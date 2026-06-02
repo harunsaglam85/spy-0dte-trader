@@ -1,4 +1,9 @@
-.env 
-__pycache__/ 
-*.csv 
-*.txt 
+.env
+*.env
+__pycache__/
+*.csv
+*.txt
+*.pkl
+*.pyc
+backtest_data/
+paper_trades*.csv

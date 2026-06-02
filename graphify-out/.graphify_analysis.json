@@ -1,0 +1,249 @@
+{
+  "communities": {
+    "0": [
+      "spy_0dte_trader_tastytrade_dashboard_build_report",
+      "spy_0dte_trader_tastytrade_dashboard_f",
+      "spy_0dte_trader_tastytrade_dashboard_get_account_balance",
+      "spy_0dte_trader_tastytrade_dashboard_get_quote",
+      "spy_0dte_trader_tastytrade_dashboard_get_session_token",
+      "spy_0dte_trader_tastytrade_dashboard_main",
+      "spy_0dte_trader_tastytrade_dashboard_strip",
+      "tastytrade_dashboard_py",
+      "tastytrade_dashboard_py_float",
+      "tastytrade_dashboard_py_str"
+    ],
+    "1": [
+      "paper_trader_py",
+      "paper_trader_py_str",
+      "spy_0dte_trader_paper_trader_fetch_spy_bars",
+      "spy_0dte_trader_paper_trader_fetch_vix",
+      "spy_0dte_trader_paper_trader_poly_get",
+      "spy_0dte_trader_paper_trader_s",
+      "spy_0dte_trader_paper_trader_tt_get",
+      "spy_0dte_trader_paper_trader_tt_token",
+      "spy_0dte_trader_paper_trader_validate_env"
+    ],
+    "2": [
+      "bool",
+      "datetime",
+      "spy_0dte_trader_paper_trader_in_market_hours",
+      "spy_0dte_trader_paper_trader_in_trade_window",
+      "spy_0dte_trader_paper_trader_or_complete",
+      "spy_0dte_trader_paper_trader_ortracker_satisfied",
+      "spy_0dte_trader_paper_trader_past_cutoff",
+      "spy_0dte_trader_paper_trader_score_conditions"
+    ],
+    "3": [
+      "morning_briefing_py",
+      "spy_0dte_trader_morning_briefing_fetch_bull_bear_volume",
+      "spy_0dte_trader_morning_briefing_fetch_spy_bars",
+      "spy_0dte_trader_morning_briefing_fetch_vxx_bars",
+      "spy_0dte_trader_morning_briefing_get_daily_bars",
+      "spy_0dte_trader_morning_briefing_last_trading_day",
+      "spy_0dte_trader_morning_briefing_rationale_118"
+    ],
+    "4": [
+      "morning_briefing_py_date",
+      "morning_briefing_py_float",
+      "spy_0dte_trader_morning_briefing_fetch_premarket",
+      "spy_0dte_trader_morning_briefing_fetch_put_call",
+      "spy_0dte_trader_morning_briefing_pg",
+      "spy_0dte_trader_morning_briefing_rationale_74"
+    ],
+    "5": [
+      "spy_0dte_trader_paper_trader_main",
+      "spy_0dte_trader_paper_trader_now_et",
+      "spy_0dte_trader_paper_trader_ortracker",
+      "spy_0dte_trader_paper_trader_ortracker_reset",
+      "spy_0dte_trader_paper_trader_position_init",
+      "spy_0dte_trader_paper_trader_position_update"
+    ],
+    "6": [
+      "spy_0dte_trader_paper_trader_hr",
+      "spy_0dte_trader_paper_trader_position",
+      "spy_0dte_trader_paper_trader_position_check_exit",
+      "spy_0dte_trader_paper_trader_position_held_min",
+      "spy_0dte_trader_paper_trader_position_pnl",
+      "spy_0dte_trader_paper_trader_print_dashboard"
+    ],
+    "7": [
+      "spy_0dte_trader_morning_briefing_arrow",
+      "spy_0dte_trader_morning_briefing_compute_bias",
+      "spy_0dte_trader_morning_briefing_fmt_p",
+      "spy_0dte_trader_morning_briefing_ma",
+      "spy_0dte_trader_morning_briefing_main"
+    ],
+    "8": [
+      "paper_trader_py_date",
+      "spy_0dte_trader_paper_trader_build_opt_info",
+      "spy_0dte_trader_paper_trader_build_opt_ticker",
+      "spy_0dte_trader_paper_trader_nearest_exp",
+      "spy_0dte_trader_paper_trader_rationale_217"
+    ],
+    "9": [
+      "paper_trader_py_float",
+      "spy_0dte_trader_paper_trader_calc_opening_range",
+      "spy_0dte_trader_paper_trader_calc_vol_avg",
+      "spy_0dte_trader_paper_trader_calc_vwap",
+      "spy_0dte_trader_paper_trader_rationale_176"
+    ],
+    "10": [
+      "spy_0dte_trader_spy_avg_fetch_spy_close",
+      "spy_0dte_trader_spy_avg_get_last_n_trading_days",
+      "spy_avg_py",
+      "spy_avg_py_date",
+      "spy_avg_py_float"
+    ],
+    "11": [
+      "spy_0dte_trader_morning_briefing_fmt_chg",
+      "spy_0dte_trader_morning_briefing_pct"
+    ],
+    "12": [
+      "spy_0dte_trader_morning_briefing_fetch_calendar",
+      "spy_0dte_trader_morning_briefing_rationale_135"
+    ],
+    "13": [
+      "spy_0dte_trader_paper_trader_fetch_option_ask",
+      "spy_0dte_trader_paper_trader_rationale_147"
+    ],
+    "14": [
+      "spy_0dte_trader_paper_trader_get_tt_chain",
+      "spy_0dte_trader_paper_trader_rationale_226"
+    ],
+    "15": [
+      "int",
+      "spy_0dte_trader_paper_trader_log_trade"
+    ]
+  },
+  "cohesion": {
+    "0": 0.37777777777777777,
+    "1": 0.4444444444444444,
+    "2": 0.4642857142857143,
+    "3": 0.47619047619047616,
+    "4": 0.4,
+    "5": 0.5333333333333333,
+    "6": 0.4666666666666667,
+    "7": 0.5,
+    "8": 0.5,
+    "9": 0.4,
+    "10": 0.4,
+    "11": 1.0,
+    "12": 1.0,
+    "13": 1.0,
+    "14": 1.0,
+    "15": 1.0
+  },
+  "gods": [
+    {
+      "id": "spy_0dte_trader_paper_trader_main",
+      "label": "main()",
+      "degree": 23
+    },
+    {
+      "id": "datetime",
+      "label": "datetime",
+      "degree": 14
+    },
+    {
+      "id": "paper_trader_py_float",
+      "label": "float",
+      "degree": 14
+    },
+    {
+      "id": "spy_0dte_trader_morning_briefing_main",
+      "label": "main()",
+      "degree": 13
+    },
+    {
+      "id": "paper_trader_py_str",
+      "label": "str",
+      "degree": 13
+    },
+    {
+      "id": "spy_0dte_trader_paper_trader_score_conditions",
+      "label": "score_conditions()",
+      "degree": 11
+    },
+    {
+      "id": "spy_0dte_trader_paper_trader_position",
+      "label": "Position",
+      "degree": 8
+    },
+    {
+      "id": "spy_0dte_trader_paper_trader_log_trade",
+      "label": "log_trade()",
+      "degree": 8
+    },
+    {
+      "id": "bool",
+      "label": "bool",
+      "degree": 7
+    },
+    {
+      "id": "spy_0dte_trader_paper_trader_fetch_option_ask",
+      "label": "fetch_option_ask()",
+      "degree": 7
+    }
+  ],
+  "surprises": [
+    {
+      "source": "get_daily_bars()",
+      "target": "pg()",
+      "source_files": [
+        "morning_briefing.py",
+        "morning_briefing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 4 \u2192 community 3"
+    },
+    {
+      "source": "main()",
+      "target": "last_trading_day()",
+      "source_files": [
+        "morning_briefing.py",
+        "morning_briefing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 3 \u2192 community 7"
+    },
+    {
+      "source": "main()",
+      "target": "fmt_chg()",
+      "source_files": [
+        "morning_briefing.py",
+        "morning_briefing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 11 \u2192 community 7"
+    },
+    {
+      "source": "main()",
+      "target": "fetch_premarket()",
+      "source_files": [
+        "morning_briefing.py",
+        "morning_briefing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 4 \u2192 community 7"
+    },
+    {
+      "source": "main()",
+      "target": "fetch_calendar()",
+      "source_files": [
+        "morning_briefing.py",
+        "morning_briefing.py"
+      ],
+      "confidence": "EXTRACTED",
+      "relation": "calls",
+      "note": "Bridges community 12 \u2192 community 7"
+    }
+  ],
+  "tokens": {
+    "input": 0,
+    "output": 0
+  }
+}
