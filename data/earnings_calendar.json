@@ -1,0 +1,13 @@
+{
+  "_comment": "Q2/Q3 2026 earnings estimates. Update weekly via manual review.",
+  "_updated": "2026-06-02",
+  "_next_update": "2026-06-09",
+  "NVDA":  ["2026-08-20"],
+  "TSLA":  ["2026-07-23"],
+  "AMD":   ["2026-07-29"],
+  "AAPL":  ["2026-07-30"],
+  "MSFT":  ["2026-07-28"],
+  "META":  ["2026-07-29"],
+  "GOOGL": ["2026-07-28"],
+  "AMZN":  ["2026-07-31"]
+}
