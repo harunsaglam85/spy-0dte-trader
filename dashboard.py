@@ -129,6 +129,14 @@ def _uptime(pid):
         return "unknown"
 
 def _parse_log():
+    """Parse logs/main.log for latest VIX, SPY and heartbeat timestamp.
+
+    Handles multiple log formats produced by main.py:
+      "VIX from Tradier: 16.08"
+      "VIX: 18.32  |  SPY current: $578.42"
+      "'spy_price': 578.42"  (market-state dict repr)
+    Falls back to the regimes DB table when no VIX line is found.
+    """
     vix = spy = last_ts = None
     api_calls = 0
     try:
@@ -139,7 +147,9 @@ def _parse_log():
                 except OSError:
                     f.seek(0)
                 lines = f.read().decode("utf-8", errors="ignore").splitlines()[-500:]
+
             for line in reversed(lines):
+                # Most-recent log timestamp → heartbeat
                 if last_ts is None:
                     m = re.match(r"^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
                     if m:
@@ -147,16 +157,46 @@ def _parse_log():
                             last_ts = datetime.strptime(m.group(1), "%Y-%m-%d %H:%M:%S")
                         except Exception:
                             pass
-                if vix is None or spy is None:
-                    m = re.search(r"VIX:\s*([\d.]+).*SPY.*\$([\d.]+)", line)
-                    if m:
-                        vix, spy = float(m.group(1)), float(m.group(2))
+
+                # VIX — try specific Tradier format first, then generic
+                if vix is None:
+                    for pat in (
+                        r"VIX from Tradier:\s*([\d.]+)",
+                        r"\bVIX:\s*([\d.]+)",
+                        r"['\"]vix['\"]\s*:\s*([\d.]+)",
+                    ):
+                        m = re.search(pat, line, re.I)
+                        if m:
+                            vix = float(m.group(1))
+                            break
+
+                # SPY price
+                if spy is None:
+                    for pat in (
+                        r"SPY current:\s*\$([\d.]+)",
+                        r"SPY.*?\$([\d.]+)",
+                        r"['\"]spy_price['\"]\s*:\s*([\d.]+)",
+                    ):
+                        m = re.search(pat, line, re.I)
+                        if m:
+                            spy = float(m.group(1))
+                            break
+
                 if re.search(r"tradier|alpaca|api call", line, re.I):
                     api_calls += 1
+
                 if vix and spy and last_ts:
                     break
+
     except Exception as e:
         logging.error("Log parse: %s", e)
+
+    # Fallback: regimes table has daily VIX snapshots
+    if vix is None:
+        r = qdb("SELECT vix FROM regimes ORDER BY date DESC LIMIT 1", one=True)
+        if r and r.get("vix"):
+            vix = float(r["vix"])
+
     return vix, spy, last_ts, api_calls
 
 def _fmt_size(n):
@@ -174,6 +214,18 @@ def _market_status():
         return "CLOSED"
     t = (now.hour, now.minute)
     return "OPEN" if (9, 30) <= t < (16, 0) else "CLOSED"
+
+def _market_data():
+    """VIX, SPY price and market phase — used for server-side header rendering."""
+    vix, spy, _, _ = _parse_log()
+    phase = _market_status()
+    now = datetime.now(NY_TZ)
+    return {
+        "vix": vix,
+        "spy_price": spy,
+        "phase": phase,
+        "et_time": now.strftime("%I:%M %p ET"),
+    }
 
 def _day_of_30():
     r = qdb("SELECT MIN(date(timestamp)) s FROM trades", one=True)
@@ -287,6 +339,12 @@ def api_dashboard():
         },
     })
 
+@app.route("/api/market")
+@login_required
+def api_market():
+    """Lightweight endpoint: VIX, SPY price, market phase, ET time."""
+    return jsonify(_market_data())
+
 @app.route("/login", methods=["GET", "POST"])
 @rate_limit("10 per minute")
 def login():
@@ -311,7 +369,23 @@ def logout():
 @app.route("/")
 @login_required
 def index():
-    return make_response(DASHBOARD_HTML, 200, {"Content-Type": "text/html; charset=utf-8"})
+    """Render dashboard with VIX, SPY, and market status embedded at response time.
+    The page carries a 60-second meta-refresh so values stay current without JS fetches.
+    """
+    mkt = _market_data()
+    vix_str  = f"VIX {mkt['vix']:.2f}"        if mkt["vix"]       else "VIX —"
+    spy_str  = f"SPY ${mkt['spy_price']:.2f}"  if mkt["spy_price"] else "SPY —"
+    phase    = mkt["phase"]                    # "OPEN" or "CLOSED"
+    mkt_cls  = "open" if phase == "OPEN" else "closed"
+
+    html = (
+        DASHBOARD_HTML
+        .replace("__VIX__",     vix_str)
+        .replace("__SPY__",     spy_str)
+        .replace("__MARKET__",  phase)
+        .replace("__MKTCLS__",  mkt_cls)
+    )
+    return make_response(html, 200, {"Content-Type": "text/html; charset=utf-8"})
 
 # ─── HTML: Login ──────────────────────────────────────────────────────────────
 LOGIN_HTML = """<!DOCTYPE html>
@@ -374,6 +448,7 @@ DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta http-equiv="refresh" content="60">
 <title>Cloud Trader — Dashboard</title>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js" integrity="sha384-NrKB+u6Ts6AtkIhwPixiKTzgSKNblyhlk0Sohlgar9UHUBzai/sgnNNWWd291xqt" crossorigin="anonymous"></script>
@@ -546,12 +621,12 @@ tbody td{padding:9px 12px;color:var(--text);white-space:nowrap}
   </div>
   <div class="hdr-center">
     <span id="clock" class="mono">--:--:-- ET</span>
-    <span class="market-badge closed" id="market-status">LOADING</span>
-    <span id="vix-val" class="mono muted">VIX --.-</span>
+    <span class="market-badge __MKTCLS__" id="market-status">__MARKET__</span>
+    <span id="vix-val" class="mono muted">__VIX__</span>
   </div>
   <div class="hdr-right">
     <span id="day-val" class="mono">Day -- / 30</span>
-    <span id="spy-val" class="mono">SPY $---.-</span>
+    <span id="spy-val" class="mono">__SPY__</span>
     <span id="last-update"></span>
     <form action="/logout" method="POST" style="margin:0">
       <button class="logout-btn" type="submit">Logout</button>
