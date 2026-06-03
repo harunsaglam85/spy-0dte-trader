@@ -34,10 +34,15 @@ fi
 # Remove old kill file if present
 rm -f /tmp/kill_all
 
-# Start in background
+# Start main bot in background
 echo "Starting CloudTrader..."
 nohup python main.py >> logs/main.log 2>&1 &
 echo $! > /tmp/cloud_trader.pid
+
+# Start dashboard
+echo "Starting Dashboard on port 8080..."
+nohup python dashboard.py >> logs/dashboard.log 2>&1 &
+echo $! > /tmp/cloud_trader_dashboard.pid
 
 sleep 2
 

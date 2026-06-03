@@ -3,9 +3,8 @@ data_feeds.py — Multi-source market data layer.
 
 Sources
 -------
-Tradier   — real-time quotes and options chains (rate-limited to 200 calls/hr).
+Tradier   — real-time quotes, options chains, and VIX (rate-limited to 200 calls/hr).
 Alpaca    — OHLCV bars (5-min and daily) via the data API.
-yfinance  — VIX spot price with a 5-minute in-process cache.
 
 Rate limiting
 -------------
@@ -29,11 +28,9 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-import numpy as np
 import pandas as pd
 import pytz
 import requests
-import yfinance as yf
 
 TRADIER_BASE = "https://api.tradier.com/v1"
 ALPACA_BASE_DATA = "https://data.alpaca.markets/v2"
@@ -41,7 +38,7 @@ NY_TZ = pytz.timezone("America/New_York")
 
 
 class DataFeeds:
-    """Unified data-feed client for Tradier, Alpaca, and yfinance."""
+    """Unified data-feed client for Tradier and Alpaca."""
 
     def __init__(self) -> None:
         self.logger = logging.getLogger("data_feeds")
@@ -373,10 +370,9 @@ class DataFeeds:
     # ------------------------------------------------------------------
 
     def get_vix(self) -> float:
-        """Return the latest VIX spot price.
+        """Return the latest VIX spot price via Tradier.
 
-        Result is cached for 5 minutes to avoid hammering yfinance.
-        Falls back to a conservative default of 20.0 on any error.
+        Result is cached for 5 minutes.  Falls back to 20.0 on any error.
         """
         cached_value, fetched_at = self._vix_cache
         if cached_value is not None and (time.monotonic() - fetched_at) < self._vix_cache_ttl:
@@ -384,23 +380,17 @@ class DataFeeds:
 
         vix = None
         try:
-            ticker = yf.Ticker("^VIX")
-            vix = ticker.fast_info["last_price"]
-            if vix and not np.isnan(float(vix)):
-                vix = float(vix)
-            else:
-                raise ValueError("fast_info returned NaN/None")
+            data = self._tradier_get("/markets/quotes", params={"symbols": "VIX"})
+            quote = data["quotes"]["quote"]
+            if isinstance(quote, list):
+                quote = quote[0]
+            vix = float(quote["last"])
         except Exception as exc:
-            self.logger.warning("get_vix fast_info failed (%s); trying yf.download.", exc)
-            try:
-                hist = yf.download("^VIX", period="1d", progress=False)
-                vix = float(hist["Close"].iloc[-1])
-            except Exception as exc2:
-                self.logger.error("get_vix download also failed: %s. Using default 20.0.", exc2)
-                vix = 20.0
+            self.logger.warning("get_vix Tradier failed: %s. Using default 20.0", exc)
+            vix = 20.0
 
         # Sanity-check: VIX should be between 5 and 150 under normal conditions.
-        if vix is None or np.isnan(vix) or vix < 5.0 or vix > 150.0:
+        if vix is None or vix < 5.0 or vix > 150.0:
             self.logger.warning(
                 "get_vix: suspicious value %.2f — using conservative default 20.0.", vix or -1
             )
@@ -410,24 +400,15 @@ class DataFeeds:
         return vix
 
     def get_spy_price(self) -> float:
-        """Return the latest SPY last-trade price.
+        """Return the latest SPY last-trade price via Tradier.
 
-        Tries Tradier first, then yfinance as a fallback.
-        Returns 0.0 on complete failure.
+        Returns 0.0 on failure.
         """
         quote = self.get_tradier_quote("SPY")
         if quote and quote.get("last", 0.0) > 0.0:
             return quote["last"]
 
-        self.logger.warning("get_spy_price: Tradier unavailable, falling back to yfinance.")
-        try:
-            ticker = yf.Ticker("SPY")
-            price = ticker.fast_info["last_price"]
-            if price and not np.isnan(float(price)):
-                return float(price)
-        except Exception as exc:
-            self.logger.error("get_spy_price yfinance fallback failed: %s", exc)
-
+        self.logger.warning("get_spy_price: Tradier returned no valid price.")
         return 0.0
 
     # ------------------------------------------------------------------
@@ -459,16 +440,11 @@ class DataFeeds:
         return df[["open", "high", "low", "close", "volume"]].sort_index()
 
     def get_stock_price(self, symbol: str) -> float:
-        """Return the latest last-trade price for *symbol*. Returns 0.0 on failure."""
+        """Return the latest last-trade price for *symbol* via Tradier. Returns 0.0 on failure."""
         quote = self.get_tradier_quote(symbol)
         if quote and quote.get("last", 0.0) > 0.0:
             return float(quote["last"])
-        try:
-            price = yf.Ticker(symbol).fast_info["last_price"]
-            if price and not pd.isna(float(price)):
-                return float(price)
-        except Exception as exc:
-            self.logger.error("get_stock_price(%s) failed: %s", symbol, exc)
+        self.logger.warning("get_stock_price(%s): Tradier returned no valid price.", symbol)
         return 0.0
 
     def get_moving_average(self, symbol: str, period: int = 50) -> float:
