@@ -17,7 +17,7 @@ import logging
 import statistics
 from collections import defaultdict
 from datetime import date, datetime, timedelta
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 # ---------------------------------------------------------------------------
 # Baseline targets from backtest research

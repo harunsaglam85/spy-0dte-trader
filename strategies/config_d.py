@@ -17,7 +17,7 @@ Smart exit  : after 10 min, if gain < 1% AND volume declining → exit
 import logging
 import math
 from datetime import datetime, date
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pytz
@@ -34,7 +34,7 @@ NY_TZ = pytz.timezone('America/New_York')
 _ENTRY_DAYS = {0, 4}
 
 
-def _wilder_rsi(closes: list[float], period: int = 14) -> float:
+def _wilder_rsi(closes: List[float], period: int = 14) -> float:
     """Compute Wilder's RSI from a list of close prices.
 
     Returns NaN when not enough data is available.
@@ -60,7 +60,7 @@ def _wilder_rsi(closes: list[float], period: int = 14) -> float:
     return 100.0 - (100.0 / (1.0 + rs))
 
 
-def _compute_vwap(bars: list[dict]) -> float:
+def _compute_vwap(bars: List[dict]) -> float:
     """Compute VWAP from a list of OHLCV bar dicts with keys
     'high', 'low', 'close', 'volume'.
     """
@@ -87,7 +87,7 @@ class ConfigD:
         self.feeds = feeds
         self.logger = logging.getLogger('strategy_config_d')
 
-        self._open_positions: list[dict] = []
+        self._open_positions: List[dict] = []
         self._daily_pnl: float = 0.0
         self._daily_loss_limit: float = 500.0
         self._paused: bool = False
@@ -255,9 +255,9 @@ class ConfigD:
             pos['entry_price'], pos.get('strike'), pos.get('expiration'),
         )
 
-    def update_positions(self, market_state: dict) -> list[dict]:
+    def update_positions(self, market_state: dict) -> List[dict]:
         """Check open positions for exits. Returns list of closed trade dicts."""
-        closed: list[dict] = []
+        closed: List[dict] = []
         if not self._open_positions:
             return closed
 
@@ -265,7 +265,7 @@ class ConfigD:
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
         spy_price = market_state['spy_price']
 
-        remaining: list[dict] = []
+        remaining: List[dict] = []
         for pos in self._open_positions:
             result = self._evaluate_exit(pos, market_state, ny_dt, spy_price)
             if result is not None:

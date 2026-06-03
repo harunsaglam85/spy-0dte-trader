@@ -29,7 +29,7 @@ Minimum 50 bars of data required.
 import logging
 import math
 from datetime import datetime, date, timedelta
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pytz
@@ -62,7 +62,7 @@ def _count_trading_days_elapsed(from_dt: datetime, to_dt: datetime) -> int:
     return count
 
 
-def compute_vpin(bars: list[dict], buckets: int = 50) -> Optional[float]:
+def compute_vpin(bars: List[dict], buckets: int = 50) -> Optional[float]:
     """Compute VPIN from a list of OHLCV bar dicts.
 
     Parameters
@@ -78,9 +78,9 @@ def compute_vpin(bars: list[dict], buckets: int = 50) -> Optional[float]:
         return None
 
     # ---- Step 1: compute bar-level buy/sell volumes ----
-    bar_buy: list[float] = []
-    bar_sell: list[float] = []
-    bar_total: list[float] = []
+    bar_buy: List[float] = []
+    bar_sell: List[float] = []
+    bar_total: List[float] = []
 
     for bar in bars:
         vol = float(bar.get('volume', 0))
@@ -116,7 +116,7 @@ def compute_vpin(bars: list[dict], buckets: int = 50) -> Optional[float]:
     # ---- Step 2: fill volume-clock buckets ----
     bucket_target = total_volume / buckets
 
-    bucket_vpins: list[float] = []
+    bucket_vpins: List[float] = []
     bk_buy = 0.0
     bk_sell = 0.0
     bk_total = 0.0
@@ -179,7 +179,7 @@ class VPIN:
         self.feeds = feeds
         self.logger = logging.getLogger('strategy_vpin')
 
-        self._open_positions: list[dict] = []
+        self._open_positions: List[dict] = []
         self._daily_pnl: float = 0.0
         self._daily_loss_limit: float = 500.0
         self._paused: bool = False
@@ -297,9 +297,9 @@ class VPIN:
             pos['conditions']['shares'],
         )
 
-    def update_positions(self, market_state: dict) -> list[dict]:
+    def update_positions(self, market_state: dict) -> List[dict]:
         """Check open positions for exits. Returns list of closed trade dicts."""
-        closed: list[dict] = []
+        closed: List[dict] = []
         if not self._open_positions:
             return closed
 
@@ -307,7 +307,7 @@ class VPIN:
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
         spy_price = market_state['spy_price']
 
-        remaining: list[dict] = []
+        remaining: List[dict] = []
         for pos in self._open_positions:
             result = self._evaluate_exit(pos, market_state, ny_dt, spy_price)
             if result is not None:

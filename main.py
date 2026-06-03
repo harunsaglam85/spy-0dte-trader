@@ -14,6 +14,7 @@ import threading
 from datetime import datetime, date, timedelta
 from pathlib import Path
 from logging.handlers import RotatingFileHandler
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytz
 import schedule

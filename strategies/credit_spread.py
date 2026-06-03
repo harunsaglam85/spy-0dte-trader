@@ -17,7 +17,7 @@ Contracts   : 1
 
 import logging
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytz
 
@@ -36,7 +36,7 @@ class CreditSpread:
         self.feeds = feeds
         self.logger = logging.getLogger('strategy_credit_spread')
 
-        self._open_positions: list[dict] = []
+        self._open_positions: List[dict] = []
         self._daily_pnl: float = 0.0
         self._daily_loss_limit: float = 500.0
         self._paused: bool = False
@@ -191,16 +191,16 @@ class CreditSpread:
             pos.get('expiration'),
         )
 
-    def update_positions(self, market_state: dict) -> list[dict]:
+    def update_positions(self, market_state: dict) -> List[dict]:
         """Check open positions for exits. Returns list of closed trade dicts."""
-        closed: list[dict] = []
+        closed: List[dict] = []
         if not self._open_positions:
             return closed
 
         ts: datetime = market_state['timestamp']
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
 
-        remaining: list[dict] = []
+        remaining: List[dict] = []
         for pos in self._open_positions:
             result = self._evaluate_exit(pos, market_state, ny_dt)
             if result is not None:

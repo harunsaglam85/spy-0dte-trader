@@ -18,7 +18,7 @@ import json
 import logging
 from datetime import datetime, date, timedelta
 from pathlib import Path
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import pytz
 
@@ -48,7 +48,7 @@ class Earnings:
         self.feeds = feeds
         self.logger = logging.getLogger('strategy_earnings')
 
-        self._open_positions: list[dict] = []
+        self._open_positions: List[dict] = []
         self._daily_pnl: float = 0.0
         self._daily_loss_limit: float = 500.0
         self._paused: bool = False
@@ -110,13 +110,13 @@ class Earnings:
 
         return None
 
-    def check_signals_all(self, market_state: dict) -> list[dict]:
+    def check_signals_all(self, market_state: dict) -> List[dict]:
         """Return ALL valid entry signals (one per ticker) for this bar.
 
         Convenience wrapper so the orchestrator can collect all signals
         without calling check_signals() in a loop manually.
         """
-        signals: list[dict] = []
+        signals: List[dict] = []
         ts: datetime = market_state['timestamp']
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
         today = ny_dt.date()
@@ -168,9 +168,9 @@ class Earnings:
             pos['conditions'].get('earnings_date'),
         )
 
-    def update_positions(self, market_state: dict) -> list[dict]:
+    def update_positions(self, market_state: dict) -> List[dict]:
         """Check open positions for exits. Returns list of closed trade dicts."""
-        closed: list[dict] = []
+        closed: List[dict] = []
         if not self._open_positions:
             return closed
 
@@ -178,7 +178,7 @@ class Earnings:
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
         today = ny_dt.date()
 
-        remaining: list[dict] = []
+        remaining: List[dict] = []
         for pos in self._open_positions:
             result = self._evaluate_exit(pos, market_state, ny_dt, today)
             if result is not None:

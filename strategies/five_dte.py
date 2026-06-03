@@ -18,7 +18,7 @@ Contracts    : 1  —  only ONE open position at a time
 import logging
 import math
 from datetime import datetime
-from typing import Optional
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import numpy as np
 import pytz
@@ -46,7 +46,7 @@ _MARKET_HOLIDAYS_2026 = {
 }
 
 
-def _wilder_rsi(closes: list[float], period: int = 14) -> float:
+def _wilder_rsi(closes: List[float], period: int = 14) -> float:
     """Wilder's RSI. Returns NaN when insufficient data."""
     if len(closes) < period + 1:
         return float('nan')
@@ -63,7 +63,7 @@ def _wilder_rsi(closes: list[float], period: int = 14) -> float:
     return 100.0 - 100.0 / (1.0 + avg_gain / avg_loss)
 
 
-def _compute_vwap(bars: list[dict]) -> float:
+def _compute_vwap(bars: List[dict]) -> float:
     """VWAP from OHLCV bar dicts."""
     cum_tp_vol = 0.0
     cum_vol = 0.0
@@ -109,7 +109,7 @@ class FiveDTE:
         self.feeds = feeds
         self.logger = logging.getLogger('strategy_five_dte')
 
-        self._open_positions: list[dict] = []
+        self._open_positions: List[dict] = []
         self._daily_pnl: float = 0.0
         self._daily_loss_limit: float = 500.0
         self._paused: bool = False
@@ -269,16 +269,16 @@ class FiveDTE:
             pos['entry_price'], pos.get('strike'), pos.get('expiration'),
         )
 
-    def update_positions(self, market_state: dict) -> list[dict]:
+    def update_positions(self, market_state: dict) -> List[dict]:
         """Check open positions for exits. Returns list of closed trade dicts."""
-        closed: list[dict] = []
+        closed: List[dict] = []
         if not self._open_positions:
             return closed
 
         ts: datetime = market_state['timestamp']
         ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
 
-        remaining: list[dict] = []
+        remaining: List[dict] = []
         for pos in self._open_positions:
             result = self._evaluate_exit(pos, market_state, ny_dt)
             if result is not None:
