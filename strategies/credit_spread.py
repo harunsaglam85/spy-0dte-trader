@@ -89,6 +89,12 @@ class CreditSpread:
             self.logger.info('CreditSpread: SKIP — VIX %.2f outside [15, 22]', vix)
             return None
 
+        # Sentiment filter: skip if strong bearish news.
+        sentiment = market_state.get('sentiment_score', 0.0)
+        if sentiment < -0.5:
+            self.logger.info('CreditSpread: SKIP — bearish sentiment %.3f < -0.5', sentiment)
+            return None
+
         spy_price = market_state['spy_price']
 
         # Get this week's expiration.

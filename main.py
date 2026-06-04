@@ -24,11 +24,19 @@ from core.database import Database
 from core.data_feeds import DataFeeds
 from core.performance import PerformanceTracker
 from core.reporter import Reporter
+from core.sentiment import fetch_sentiment
 from strategies.config_d import ConfigD
 from strategies.credit_spread import CreditSpread
 from strategies.five_dte import FiveDTE
 from strategies.earnings import Earnings
 from strategies.vpin import VPIN
+from core.telegram_alerts import (
+    trade_entered as tg_trade_entered,
+    trade_exited as tg_trade_exited,
+    strategy_paused as tg_strategy_paused,
+    daily_report as tg_daily_report,
+    bot_restarted as tg_bot_restarted,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -231,6 +239,7 @@ class CloudTrader:
         self._daily_reset_date: date = None
         self._pre_market_done_date: date = None
         self._spy_price_yesterday: float = 0.0
+        self._sentiment_score: float = 0.0
         self._daily_pnl: dict = {name: 0.0 for name in self.strategies}
 
         # Graceful shutdown
@@ -275,6 +284,7 @@ class CloudTrader:
             "spy_price": spy_price,
             "spy_pct_change": spy_pct_change,
             "vix": vix,
+            "sentiment_score": self._sentiment_score,
             "paused_strategies": set(self._paused_strategies),
             "daily_pnl": dict(self._daily_pnl),
         }
@@ -317,6 +327,15 @@ class CloudTrader:
             self.logger.error("Earnings calendar check failed: %s", exc)
 
         today = datetime.now(NY_TZ).date()
+
+        # Fetch morning sentiment score
+        try:
+            self._sentiment_score = fetch_sentiment()
+            self.logger.info("Morning sentiment score: %.3f", self._sentiment_score)
+        except Exception as exc:
+            self.logger.error("Sentiment fetch failed: %s", exc)
+            self._sentiment_score = 0.0
+
         self._pre_market_done_date = today
         self.logger.info("=== Pre-market tasks complete ===")
 
@@ -377,6 +396,11 @@ class CloudTrader:
                             pnl,
                             self._daily_pnl[name],
                         )
+                        tg_trade_exited(
+                            strategy=name,
+                            pnl=pnl,
+                            reason=trade.get("exit_reason", "unknown"),
+                        )
             except Exception as exc:
                 self.logger.error(
                     "update_positions error in strategy %s: %s", name, exc, exc_info=True
@@ -391,6 +415,12 @@ class CloudTrader:
                         "SIGNAL [%s]: %s", name, signal_result
                     )
                     strat._open_positions.append(signal_result)
+                    tg_trade_entered(
+                        strategy=name,
+                        direction=signal_result.get("direction", ""),
+                        price=signal_result.get("entry_price", 0.0),
+                        vix=market_state.get("vix", 0.0),
+                    )
                 else:
                     self.logger.info("No signal from strategy: %s", name)
             except Exception as exc:
@@ -404,6 +434,7 @@ class CloudTrader:
             if reason and name not in self._paused_strategies:
                 self._paused_strategies.add(name)
                 self.logger.warning("Strategy %s added to paused set: %s", name, reason)
+                tg_strategy_paused(name, reason)
 
     # ------------------------------------------------------------------
     # Post-market / EOD tasks
@@ -447,6 +478,11 @@ class CloudTrader:
             report_content = self.reporter.generate_daily_report(market_summary)
             report_path = self.reporter.save_report(report_content, today)
             self.logger.info("Daily report saved to %s", report_path)
+            total_pnl = sum(self._daily_pnl.values())
+            n_trades = sum(1 for v in self._daily_pnl.values() if v != 0.0)
+            from datetime import date as _date
+            elapsed = (_date.today() - _date(2026, 6, 2)).days + 1
+            tg_daily_report(day=elapsed, total_days=90, total_pnl=total_pnl, n_trades=n_trades)
         except Exception as exc:
             self.logger.error("Failed to generate daily report: %s", exc, exc_info=True)
 
@@ -582,6 +618,7 @@ def main() -> None:
     setup_logging()
     logger = logging.getLogger("main")
     logger.info("CloudTrader starting up — PID %d", os.getpid())
+    tg_bot_restarted(os.getpid())
 
     # Write PID file for startup.sh
     try:

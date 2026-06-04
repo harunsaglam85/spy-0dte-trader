@@ -106,6 +106,12 @@ class ConfigD:
         if not market_state.get('is_market_open', False):
             return None
 
+        # Sentiment filter: only trade on positive sentiment.
+        sentiment = market_state.get('sentiment_score', 0.0)
+        if sentiment <= 0.0:
+            self.logger.info('ConfigD: SKIP — non-positive sentiment %.3f', sentiment)
+            return None
+
         # Already have an open position – one at a time.
         if self._open_positions:
             return None
