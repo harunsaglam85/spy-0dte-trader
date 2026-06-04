@@ -271,6 +271,7 @@ class CloudTrader:
         market_state = {
             "timestamp": now,
             "phase": phase,
+            "is_market_open": phase in ("morning", "midday", "afternoon"),
             "spy_price": spy_price,
             "spy_pct_change": spy_pct_change,
             "vix": vix,
@@ -346,9 +347,18 @@ class CloudTrader:
           2. check_signals()    — looks for new entry opportunities
         After all strategies, re-evaluate kill switches.
         """
+        self.logger.info(
+            "run_strategy_checks: %d strategies | phase=%s | is_market_open=%s | vix=%.2f | spy=%.2f",
+            len(self.strategies),
+            market_state.get("phase", "?"),
+            market_state.get("is_market_open", False),
+            market_state.get("vix", 0.0),
+            market_state.get("spy_price", 0.0),
+        )
+
         for name, strat in self.strategies.items():
             if name in self._paused_strategies:
-                self.logger.debug("Strategy %s is paused — skipping", name)
+                self.logger.info("Strategy %s is paused — skipping", name)
                 continue
 
             # --- Position management ------------------------------------------
@@ -373,6 +383,7 @@ class CloudTrader:
                 )
 
             # --- Signal check -------------------------------------------------
+            self.logger.info("Checking signals for strategy: %s", name)
             try:
                 signal_result = strat.check_signals(market_state)
                 if signal_result is not None:
@@ -380,6 +391,8 @@ class CloudTrader:
                         "SIGNAL [%s]: %s", name, signal_result
                     )
                     strat._open_positions.append(signal_result)
+                else:
+                    self.logger.info("No signal from strategy: %s", name)
             except Exception as exc:
                 self.logger.error(
                     "check_signals error in strategy %s: %s", name, exc, exc_info=True
@@ -424,7 +437,15 @@ class CloudTrader:
 
         # 2. Generate and save daily report
         try:
-            report_path = self.reporter.generate_daily_report(today, self._daily_pnl)
+            market_summary = {
+                "vix": market_state.get("vix", 0.0),
+                "spy_price": market_state.get("spy_price", 0.0),
+                "spy_pct_change": market_state.get("spy_pct_change", 0.0),
+                "market_regime": market_state.get("phase", "unknown"),
+                "total_trades_today": 0,
+            }
+            report_content = self.reporter.generate_daily_report(market_summary)
+            report_path = self.reporter.save_report(report_content, today)
             self.logger.info("Daily report saved to %s", report_path)
         except Exception as exc:
             self.logger.error("Failed to generate daily report: %s", exc, exc_info=True)
@@ -483,6 +504,14 @@ class CloudTrader:
                     continue
 
                 phase = get_market_phase(now)
+                will_check = phase in ("morning", "midday", "afternoon")
+                self.logger.info(
+                    "Loop tick: time=%s phase=%s will_run_strategy_checks=%s paused=%s",
+                    now.strftime("%H:%M:%S ET"),
+                    phase,
+                    will_check,
+                    list(self._paused_strategies) or "none",
+                )
 
                 # --- Daily reset (once per trading day) -----------------------
                 if self._daily_reset_date != today:
