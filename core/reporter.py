@@ -67,34 +67,31 @@ class Reporter:
     # Main public API
     # ------------------------------------------------------------------
 
-    def generate_daily_report(self, market_summary: dict) -> str:
-        """Build and return the full daily report as a multi-line string.
+    def generate_daily_report(self, report_date, daily_pnl: dict) -> str:
+        """Build, save, and return the file path of the daily report.
 
         Parameters
         ----------
-        market_summary : dict
-            Expected keys:
-                vix              (float)
-                spy_price        (float)
-                spy_pct_change   (float)   e.g. -0.0031 for −0.31 %
-                market_regime    (str)
-                total_trades_today (int)
+        report_date : date
+            The trading date for this report.
+        daily_pnl : dict
+            Mapping of {strategy_name: pnl_float} accumulated during the session.
         """
-        today = date.today()
         now_ny = datetime.now(NY_TZ)
+        market_summary: dict = {}
 
         sections: list = []
 
-        sections.append(self._build_header(today, now_ny))
+        sections.append(self._build_header(report_date, now_ny))
         sections.append(self._build_market_summary(market_summary))
-        sections.append(self._build_strategy_breakdown(today, market_summary))
-        sections.append(self._build_winner_loser(today))
+        sections.append(self._build_strategy_breakdown(report_date, market_summary))
+        sections.append(self._build_winner_loser(report_date))
         sections.append(self._build_pending_suggestions())
         sections.append(self._build_scorecard_30d())
         sections.append(self._build_kill_switch_status())
 
         report = "\n\n".join(sections)
-        return report
+        return self.save_report(report, report_date)
 
     def save_report(self, content: str, report_date: date = None) -> str:
         """Write *content* to reports/YYYY-MM-DD.txt.
