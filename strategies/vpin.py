@@ -187,24 +187,35 @@ class VPIN:
     # ---------------------------------------------------------- public API
     def check_signals(self, market_state: dict) -> Optional[dict]:
         """Compute VPIN and return a signal dict, or None."""
+        ts: datetime = market_state.get('timestamp', datetime.now(NY_TZ))
+        ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
+        is_open = market_state.get('is_market_open', False)
+        self.logger.info(
+            'VPIN check_signals: time=%s is_open=%s paused=%s daily_pnl=%.2f open_positions=%d',
+            ny_dt.strftime('%H:%M:%S'), is_open, self._paused, self._daily_pnl, len(self._open_positions),
+        )
         if self._paused:
+            self.logger.info('VPIN: SKIP — strategy paused')
             return None
         if self.daily_loss_exceeded():
+            self.logger.info('VPIN: SKIP — daily loss limit reached (pnl=%.2f limit=%.2f)',
+                             self._daily_pnl, self._daily_loss_limit)
             return None
-        if not market_state.get('is_market_open', False):
+        if not is_open:
+            self.logger.info('VPIN: SKIP — market not open')
             return None
 
         # One position at a time.
         if self._open_positions:
+            self.logger.info('VPIN: SKIP — position already open')
             return None
-
-        ts: datetime = market_state['timestamp']
-        ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
 
         # Only trade during regular market hours (after first 15 min).
         from datetime import time as dtime
         t = ny_dt.time()
         if not (dtime(9, 45) <= t <= dtime(15, 30)):
+            self.logger.info('VPIN: SKIP — outside trading window 9:45-15:30 (now %s)',
+                             ny_dt.strftime('%H:%M'))
             return None
 
         spy_price = market_state['spy_price']

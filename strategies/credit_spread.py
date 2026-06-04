@@ -44,34 +44,49 @@ class CreditSpread:
     # ---------------------------------------------------------- public API
     def check_signals(self, market_state: dict) -> Optional[dict]:
         """Evaluate entry conditions; return a signal dict or None."""
+        ts: datetime = market_state.get('timestamp', datetime.now(NY_TZ))
+        ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
+        vix = market_state.get('vix', 0.0)
+        is_open = market_state.get('is_market_open', False)
+        day_names = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
+        self.logger.info(
+            'CreditSpread check_signals: time=%s day=%s is_open=%s paused=%s vix=%.2f open_positions=%d',
+            ny_dt.strftime('%H:%M:%S'), day_names[ny_dt.weekday()], is_open,
+            self._paused, vix, len(self._open_positions),
+        )
         if self._paused:
+            self.logger.info('CreditSpread: SKIP — strategy paused')
             return None
         if self.daily_loss_exceeded():
+            self.logger.info('CreditSpread: SKIP — daily loss limit reached (pnl=%.2f limit=%.2f)',
+                             self._daily_pnl, self._daily_loss_limit)
             return None
-        if not market_state.get('is_market_open', False):
+        if not is_open:
+            self.logger.info('CreditSpread: SKIP — market not open')
             return None
 
         # One spread at a time.
         if self._open_positions:
+            self.logger.info('CreditSpread: SKIP — position already open')
             return None
-
-        ts: datetime = market_state['timestamp']
-        ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
 
         # Entry day filter.
         if ny_dt.weekday() not in _ENTRY_DAYS:
+            self.logger.info('CreditSpread: SKIP — not entry day (need Mon/Wed/Fri, got %s)',
+                             day_names[ny_dt.weekday()])
             return None
 
         # Time window: 10:00 – 11:00.
         from datetime import time as dtime
         t = ny_dt.time()
         if not (dtime(10, 0) <= t <= dtime(11, 0)):
+            self.logger.info('CreditSpread: SKIP — outside entry window 10:00-11:00 (now %s)',
+                             ny_dt.strftime('%H:%M'))
             return None
 
         # VIX filter: 15 – 22.
-        vix = market_state.get('vix', 0.0)
         if not (15.0 <= vix <= 22.0):
-            self.logger.debug('CreditSpread: VIX %.2f out of [15, 22], skip', vix)
+            self.logger.info('CreditSpread: SKIP — VIX %.2f outside [15, 22]', vix)
             return None
 
         spy_price = market_state['spy_price']

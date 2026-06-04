@@ -54,6 +54,7 @@ class Earnings:
         self._paused: bool = False
 
         # Cache the earnings calendar; reloaded once per day.
+        self._calendar: dict = {}
         self._calendar_cache: dict = {}
         self._calendar_loaded_date: Optional[date] = None
 
@@ -65,11 +66,23 @@ class Earnings:
         should call this in a loop until it returns None to pick up all
         simultaneous entries.
         """
+        ts: datetime = market_state.get('timestamp', datetime.now(NY_TZ))
+        ny_dt = ts.astimezone(NY_TZ) if ts.tzinfo else NY_TZ.localize(ts)
+        vix = market_state.get('vix', 0.0)
+        is_open = market_state.get('is_market_open', False)
+        self.logger.info(
+            'Earnings check_signals: time=%s is_open=%s paused=%s daily_pnl=%.2f vix=%.2f open_positions=%d',
+            ny_dt.strftime('%H:%M:%S'), is_open, self._paused, self._daily_pnl, vix, len(self._open_positions),
+        )
         if self._paused:
+            self.logger.info('Earnings: SKIP — strategy paused')
             return None
         if self.daily_loss_exceeded():
+            self.logger.info('Earnings: SKIP — daily loss limit reached (pnl=%.2f limit=%.2f)',
+                             self._daily_pnl, self._daily_loss_limit)
             return None
-        if not market_state.get('is_market_open', False):
+        if not is_open:
+            self.logger.info('Earnings: SKIP — market not open')
             return None
 
         ts: datetime = market_state['timestamp']
@@ -470,4 +483,4 @@ class Earnings:
         """Reload earnings calendar from disk. Called in pre-market by orchestrator."""
         self._load_calendar()
         self.logger.info('Earnings: calendar refreshed, %d tickers loaded',
-                         len(self._calendar))
+                         len(self._calendar_cache))
