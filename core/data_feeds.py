@@ -430,19 +430,31 @@ class DataFeeds:
     # ------------------------------------------------------------------
 
     def get_intraday_bars(self, symbol: str = "SPY", timeframe: str = "5Min",
-                          limit: int = 100, interval: int = None) -> pd.DataFrame:
+                          limit: int = 100, interval: int = None,
+                          days: int = 1) -> pd.DataFrame:
         """Return recent intraday OHLCV bars for *symbol* via Alpaca.
 
         *timeframe* follows Alpaca notation: '1Min', '5Min', '15Min', '1Hour'.
         *interval* (1, 5, or 15) is an alternative way to specify bar size in
         minutes; when provided it overrides *timeframe*.
+        *days* sets the look-back window; overrides *limit* by computing
+        start/end date params so Alpaca returns bars across that many calendar days.
         Returns empty DataFrame on failure.
         """
         if interval is not None:
             _map = {1: "1Min", 5: "5Min", 15: "15Min", 60: "1Hour"}
             timeframe = _map.get(interval, f"{interval}Min")
         endpoint = f"/stocks/{symbol}/bars"
-        params = {"timeframe": timeframe, "limit": limit, "adjustment": "split"}
+        now_ny = datetime.now(NY_TZ)
+        start = (now_ny - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        end = now_ny.strftime("%Y-%m-%dT%H:%M:%SZ")
+        params = {
+            "timeframe": timeframe,
+            "start": start,
+            "end": end,
+            "limit": limit,
+            "adjustment": "split",
+        }
         data = self._alpaca_get(endpoint, params)
         bars_list = data.get("bars", [])
         if not bars_list:
