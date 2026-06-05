@@ -74,7 +74,7 @@ def compute_vpin(bars: List[dict], buckets: int = 50) -> Optional[float]:
     -------
     float in [0, 1] or None if insufficient data.
     """
-    if not bars or len(bars) < buckets:
+    if bars is None or bars.empty or len(bars) < buckets:
         return None
 
     # ---- Step 1: compute bar-level buy/sell volumes ----
