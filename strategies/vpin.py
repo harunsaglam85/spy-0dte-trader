@@ -77,6 +77,10 @@ def compute_vpin(bars: List[dict], buckets: int = 50) -> Optional[float]:
     if bars is None or bars.empty or len(bars) < buckets:
         return None
 
+    # Accept both a DataFrame (from get_intraday_bars) and a list of dicts.
+    if hasattr(bars, 'to_dict'):
+        bars = bars.reset_index().to_dict('records')
+
     # ---- Step 1: compute bar-level buy/sell volumes ----
     bar_buy: List[float] = []
     bar_sell: List[float] = []
@@ -238,6 +242,7 @@ class VPIN:
         # Use only the most recent bars (at least BUCKETS, more is fine for bucket-filling).
         analysis_bars = bars[-max(self.BUCKETS * 3, len(bars)):]
 
+        self.logger.info('VPIN bars columns: %s', list(analysis_bars.columns))
         vpin_value = compute_vpin(analysis_bars, buckets=self.BUCKETS)
 
         if vpin_value is None:
