@@ -442,6 +442,9 @@ class DataFeeds:
         Returns empty DataFrame on failure.
         """
         if interval is not None:
+            # Normalize string inputs like '5min' or '5Min' to an integer.
+            if isinstance(interval, str):
+                interval = int(''.join(filter(str.isdigit, interval)))
             _map = {1: "1Min", 5: "5Min", 15: "15Min", 60: "1Hour"}
             timeframe = _map.get(interval, f"{interval}Min")
         endpoint = f"/stocks/{symbol}/bars"

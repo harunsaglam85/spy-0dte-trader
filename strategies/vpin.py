@@ -230,7 +230,8 @@ class VPIN:
 
         if bars is None or bars.empty or len(bars) < self.BUCKETS:
             self.logger.debug(
-                'VPIN: insufficient bars (%d < %d)', len(bars) if bars else 0, self.BUCKETS
+                'VPIN: insufficient bars (%d < %d)',
+                len(bars) if bars is not None and not bars.empty else 0, self.BUCKETS
             )
             return None
 
