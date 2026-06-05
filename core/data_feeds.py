@@ -266,8 +266,12 @@ class DataFeeds:
             )
             return []
 
-    def get_next_expiry(self, symbol: str = "SPY", dte_target: int = 5) -> str:
+    def get_next_expiry(self, symbol: str = "SPY", dte_target: int = 5,
+                        weekly: bool = False) -> str:
         """Return the nearest expiration that is at least *dte_target* days away.
+
+        If *weekly* is True, return the nearest Friday expiration regardless of
+        *dte_target* (used by weekly/0DTE strategies).
 
         Returns
         -------
@@ -278,12 +282,18 @@ class DataFeeds:
         for exp_str in expirations:
             try:
                 exp_date = date.fromisoformat(exp_str)
-                if (exp_date - today).days >= dte_target:
-                    return exp_str
+                if weekly:
+                    # weekday() == 4 is Friday
+                    if exp_date >= today and exp_date.weekday() == 4:
+                        return exp_str
+                else:
+                    if (exp_date - today).days >= dte_target:
+                        return exp_str
             except ValueError:
                 continue
         self.logger.warning(
-            "get_next_expiry: no expiry found for %s with dte_target=%d", symbol, dte_target
+            "get_next_expiry: no expiry found for %s (weekly=%s, dte_target=%d)",
+            symbol, weekly, dte_target,
         )
         return ""
 
@@ -420,12 +430,17 @@ class DataFeeds:
     # ------------------------------------------------------------------
 
     def get_intraday_bars(self, symbol: str = "SPY", timeframe: str = "5Min",
-                          limit: int = 100) -> pd.DataFrame:
+                          limit: int = 100, interval: int = None) -> pd.DataFrame:
         """Return recent intraday OHLCV bars for *symbol* via Alpaca.
 
         *timeframe* follows Alpaca notation: '1Min', '5Min', '15Min', '1Hour'.
+        *interval* (1, 5, or 15) is an alternative way to specify bar size in
+        minutes; when provided it overrides *timeframe*.
         Returns empty DataFrame on failure.
         """
+        if interval is not None:
+            _map = {1: "1Min", 5: "5Min", 15: "15Min", 60: "1Hour"}
+            timeframe = _map.get(interval, f"{interval}Min")
         endpoint = f"/stocks/{symbol}/bars"
         params = {"timeframe": timeframe, "limit": limit, "adjustment": "split"}
         data = self._alpaca_get(endpoint, params)
