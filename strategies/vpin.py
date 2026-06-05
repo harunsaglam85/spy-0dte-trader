@@ -228,7 +228,7 @@ class VPIN:
             self.logger.warning('VPIN: bar fetch failed: %s', exc)
             return None
 
-        if not bars or len(bars) < self.BUCKETS:
+        if bars is None or bars.empty or len(bars) < self.BUCKETS:
             self.logger.debug(
                 'VPIN: insufficient bars (%d < %d)', len(bars) if bars else 0, self.BUCKETS
             )
