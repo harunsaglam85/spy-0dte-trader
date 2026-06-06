@@ -20,10 +20,10 @@ SUMMARY_PATH = HERMES_ROOT / 'pattern_summary.json'
 
 STRATEGIES   = [
     # Confirmed (3 contracts each)
-    'R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4',
+    'R3A', 'R3B', 'R3D', 'R3E', 'R8', 'R10', 'S4',
     # Experimental T-strategies (1 contract each)
     'T1_thursday_put', 'T2_monday_afternoon', 'T3_wednesday_afternoon', 'T4_friday_morning',
-    'T5_tuesday_bear_call', 'T6_thursday_bear_call', 'T7_high_vix',
+    'T7_high_vix',
     'T8_delta_015', 'T9_delta_025', 'T10_wide_spread', 'T11_narrow_spread', 'T12_max_data',
     'T13_thursday_afternoon', 'T14_vix_transition',
 ]

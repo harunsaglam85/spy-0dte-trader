@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Execution Engine — Autonomous 20-strategy paper trading engine.
+Hermes Execution Engine — Autonomous 19-strategy paper trading engine.
 8 confirmed strategies (3 contracts each) + 12 experimental T-strategies (1 contract each).
 Runs all strategies simultaneously via Tradier sandbox.
 Cron: 45 9 * * 1-5  (9:45 AM ET, Mon-Fri)
@@ -146,14 +146,6 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=3, spread_width=2.0,
     ),
-    'R3C': StrategyConfig(
-        name='R3C', entry_days=frozenset({0, 1, 2, 3, 4}),
-        entry_start=(10, 0), entry_end=(11, 0),
-        spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=3, spread_width=2.0,
-        extra={'require_spy_below_vwap': True},
-    ),
     'R3D': StrategyConfig(
         name='R3D', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 30), entry_end=(10, 45),
@@ -221,22 +213,6 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 30),
         contracts=1, spread_width=2.0,
-    ),
-    'T5_tuesday_bear_call': StrategyConfig(
-        name='T5_tuesday_bear_call', entry_days=frozenset({1}),
-        entry_start=(10, 45), entry_end=(11, 15),
-        spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=1, spread_width=2.0,
-        extra={'require_spy_below_vwap': True},
-    ),
-    'T6_thursday_bear_call': StrategyConfig(
-        name='T6_thursday_bear_call', entry_days=frozenset({3}),
-        entry_start=(10, 30), entry_end=(11, 0),
-        spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=1, spread_width=2.0,
-        extra={'require_spy_below_vwap': True},
     ),
     'T7_high_vix': StrategyConfig(
         name='T7_high_vix', entry_days=frozenset({0, 1, 2, 3, 4}),
