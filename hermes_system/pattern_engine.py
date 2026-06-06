@@ -18,7 +18,14 @@ HERMES_ROOT  = Path('/root/hermes_system')
 TRADES_DIR   = HERMES_ROOT / 'trades'
 SUMMARY_PATH = HERMES_ROOT / 'pattern_summary.json'
 
-STRATEGIES   = ['R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4']
+STRATEGIES   = [
+    # Confirmed (3 contracts each)
+    'R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4',
+    # Experimental T-strategies (1 contract each)
+    'T1_thursday_put', 'T2_monday_afternoon', 'T3_wednesday_afternoon', 'T4_friday_morning',
+    'T5_tuesday_bear_call', 'T6_thursday_bear_call', 'T7_high_vix',
+    'T8_delta_015', 'T9_delta_025', 'T10_wide_spread', 'T11_narrow_spread', 'T12_max_data',
+]
 VIX_BUCKETS  = [(13, 15), (15, 17), (17, 19), (19, 21), (21, 23)]
 DAYS         = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
 TIME_BUCKETS = ['09:30-10:00', '10:00-10:30', '10:30-11:00',
@@ -49,16 +56,27 @@ def load_all_trades() -> List[dict]:
 
 def _stats(trades: List[dict]) -> dict:
     if not trades:
-        return {'n': 0, 'wins': 0, 'wr': None, 'avg_pnl': None, 'total_pnl': 0.0}
+        return {
+            'n': 0, 'wins': 0, 'wr': None,
+            'avg_pnl': None, 'avg_pnl_per_contract': None, 'total_pnl': 0.0,
+        }
     wins      = sum(1 for t in trades if t.get('pnl', 0) > 0)
     total_pnl = sum(t.get('pnl', 0) for t in trades)
     avg_pnl   = total_pnl / len(trades)
+    # Per-contract P&L normalises confirmed (3c) vs experimental (1c) strategies
+    per_contract = [
+        t.get('realized_pnl_per_contract',
+              t.get('pnl', 0) / max(int(t.get('contracts', 1)), 1))
+        for t in trades
+    ]
+    avg_pnl_per_contract = sum(per_contract) / len(per_contract)
     return {
-        'n':         len(trades),
-        'wins':      wins,
-        'wr':        round(wins / len(trades), 3),
-        'avg_pnl':   round(avg_pnl, 2),
-        'total_pnl': round(total_pnl, 2),
+        'n':                    len(trades),
+        'wins':                 wins,
+        'wr':                   round(wins / len(trades), 3),
+        'avg_pnl':              round(avg_pnl, 2),
+        'avg_pnl_per_contract': round(avg_pnl_per_contract, 2),
+        'total_pnl':            round(total_pnl, 2),
     }
 
 
@@ -225,15 +243,25 @@ def main() -> None:
 
     # Print quick summary to stdout
     print('\n--- Quick Summary ---')
+    confirmed    = {'R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4'}
+    print(f"  {'Strategy':<26} {'WR':>6} {'n':>5} {'avg$/trade':>11} {'avg$/c':>8} {'total$':>9} {'kill':>6}")
+    print(f"  {'-'*26} {'-'*6} {'-'*5} {'-'*11} {'-'*8} {'-'*9} {'-'*6}")
     for name in STRATEGIES:
         s = summary['strategies'].get(name, {})
+        tier = 'CFM' if name in confirmed else 'EXP'
         if s.get('no_data'):
-            print(f'  {name:<4}: no data')
+            print(f"  {name:<26} [{tier}] no data")
             continue
-        t = s.get('total', {})
+        t  = s.get('total', {})
         kf = s.get('kill_flag', {})
-        flag = ' ⚠️  KILL' if kf.get('flag') else ''
-        print(f"  {name:<4}: WR={t.get('wr', 0):.1%} (n={t.get('n', 0)}) avg=${t.get('avg_pnl', 0):.0f}{flag}")
+        flag = 'KILL' if kf.get('flag') else 'ok'
+        wr  = f"{t.get('wr', 0):.1%}" if t.get('wr') is not None else 'n/a'
+        apc = f"${t.get('avg_pnl_per_contract', 0):+.0f}" if t.get('avg_pnl_per_contract') is not None else 'n/a'
+        print(
+            f"  {name:<26} {wr:>6} {t.get('n', 0):>5} "
+            f"${t.get('avg_pnl', 0):>+10.0f} {apc:>8} "
+            f"${t.get('total_pnl', 0):>+8.0f} {flag:>6}  [{tier}]"
+        )
 
 
 if __name__ == '__main__':

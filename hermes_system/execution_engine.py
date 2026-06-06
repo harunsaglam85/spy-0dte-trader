@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """
-Hermes Execution Engine — Autonomous 8-strategy paper trading engine.
+Hermes Execution Engine — Autonomous 20-strategy paper trading engine.
+8 confirmed strategies (3 contracts each) + 12 experimental T-strategies (1 contract each).
 Runs all strategies simultaneously via Tradier sandbox.
 Cron: 45 9 * * 1-5  (9:45 AM ET, Mon-Fri)
 """
@@ -51,9 +52,9 @@ SANDBOX_KEY     = os.getenv('TRADIER_SANDBOX_KEY', '')
 SANDBOX_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
 
 # ── Risk ───────────────────────────────────────────────────────────────────────
-MAX_LOSS_PER_STRATEGY = 200.0
-MAX_DAILY_LOSS        = 1_000.0
-MAX_CONTRACTS         = 1
+# Confirmed (3 contracts): max loss $600/day. Experimental (1 contract): $200/day.
+MAX_LOSS_PER_CONTRACT = 200.0
+MAX_DAILY_LOSS        = 5_000.0   # total paper money daily stop — halts ALL strategies
 
 ET = pytz.timezone('America/New_York')
 
@@ -95,6 +96,8 @@ class StrategyConfig:
     profit_target_pct: float           # fraction of credit to keep
     stop_multiple:     float           # stop if debit-to-close >= credit * this
     force_exit_time:   Tuple[int, int]
+    contracts:         int  = 1        # number of contracts per entry
+    spread_width:      float = 2.0    # dollar width between short and long strikes
     extra:             dict = field(default_factory=dict)
 
 
@@ -120,6 +123,7 @@ class Position:
     stop_thresh:   float          # for spreads: debit-to-close >= this → stop
                                   # for earnings: current mid <= this → stop
     force_exit:    Tuple[int, int]
+    contracts:     int  = 1
     entry_state:   dict = field(default_factory=dict)
     s4_exit_date:  Optional[date] = None
 
@@ -127,23 +131,27 @@ class Position:
 # ── Strategy definitions ───────────────────────────────────────────────────────
 
 STRATEGIES: Dict[str, StrategyConfig] = {
+    # ── Confirmed strategies — 3 contracts each ($600/day max loss) ────────────
     'R3A': StrategyConfig(
         name='R3A', entry_days=frozenset({0}),
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=3, spread_width=2.0,
     ),
     'R3B': StrategyConfig(
         name='R3B', entry_days=frozenset({2}),
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=3, spread_width=2.0,
     ),
     'R3C': StrategyConfig(
         name='R3C', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(10, 0), entry_end=(11, 0),
         spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=3, spread_width=2.0,
         extra={'require_spy_below_vwap': True},
     ),
     'R3D': StrategyConfig(
@@ -151,6 +159,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=3, spread_width=2.0,
         extra={'skip_fomc_weeks': True},
     ),
     'R3E': StrategyConfig(
@@ -158,12 +167,14 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='iron_condor', vix_min=13.0, vix_max=18.0, delta_target=0.16,
         profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 30),
+        contracts=3, spread_width=2.0,
     ),
     'R8': StrategyConfig(
         name='R8', entry_days=frozenset({4}),
         entry_start=(13, 0), entry_end=(13, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.70, stop_multiple=1.8, force_exit_time=(15, 30),
+        contracts=3, spread_width=2.0,
         extra={'require_spy_above_vwap': True},
     ),
     'R10': StrategyConfig(
@@ -171,6 +182,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 45), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=3, spread_width=2.0,
         extra={'require_spy_above_ma50_and_vwap': True},
     ),
     'S4': StrategyConfig(
@@ -178,7 +190,95 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(9, 45), entry_end=(10, 15),
         spread_type='earnings', vix_min=0.0, vix_max=100.0, delta_target=0.50,
         profit_target_pct=0.35, stop_multiple=0.0, force_exit_time=(15, 55),
+        contracts=1,
         extra={'pre_earnings_days': 5, 'stop_pct': 0.25},
+    ),
+    # ── Experimental T-strategies — 1 contract each ($200/day max loss) ────────
+    'T1_thursday_put': StrategyConfig(
+        name='T1_thursday_put', entry_days=frozenset({3}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T2_monday_afternoon': StrategyConfig(
+        name='T2_monday_afternoon', entry_days=frozenset({0}),
+        entry_start=(13, 0), entry_end=(13, 30),
+        spread_type='put_spread', vix_min=19.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T3_wednesday_afternoon': StrategyConfig(
+        name='T3_wednesday_afternoon', entry_days=frozenset({2}),
+        entry_start=(13, 0), entry_end=(13, 30),
+        spread_type='put_spread', vix_min=19.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T4_friday_morning': StrategyConfig(
+        name='T4_friday_morning', entry_days=frozenset({4}),
+        entry_start=(10, 0), entry_end=(10, 30),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 30),
+        contracts=1, spread_width=2.0,
+    ),
+    'T5_tuesday_bear_call': StrategyConfig(
+        name='T5_tuesday_bear_call', entry_days=frozenset({1}),
+        entry_start=(10, 45), entry_end=(11, 15),
+        spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+        extra={'require_spy_below_vwap': True},
+    ),
+    'T6_thursday_bear_call': StrategyConfig(
+        name='T6_thursday_bear_call', entry_days=frozenset({3}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='call_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+        extra={'require_spy_below_vwap': True},
+    ),
+    'T7_high_vix': StrategyConfig(
+        name='T7_high_vix', entry_days=frozenset({0, 1, 2, 3, 4}),
+        entry_start=(10, 0), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=20.0, vix_max=28.0, delta_target=0.15,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T8_delta_015': StrategyConfig(
+        name='T8_delta_015', entry_days=frozenset({0, 2, 4}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.15,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T9_delta_025': StrategyConfig(
+        name='T9_delta_025', entry_days=frozenset({0, 2, 4}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.25,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T10_wide_spread': StrategyConfig(
+        name='T10_wide_spread', entry_days=frozenset({0, 2, 4}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=3.0,
+    ),
+    'T11_narrow_spread': StrategyConfig(
+        name='T11_narrow_spread', entry_days=frozenset({0, 2, 4}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=1.0,
+    ),
+    'T12_max_data': StrategyConfig(
+        name='T12_max_data', entry_days=frozenset({0, 1, 2, 3, 4}),
+        entry_start=(10, 0), entry_end=(14, 0),
+        spread_type='put_spread', vix_min=14.0, vix_max=24.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
     ),
 }
 
@@ -211,8 +311,8 @@ class HermesEngine:
     # ── Main loop ──────────────────────────────────────────────────────────────
 
     def run(self) -> None:
-        log.info('Hermes Engine starting — 8 strategies active.')
-        tg_send('🚀 Hermes Engine started — 8 strategies active.')
+        log.info('Hermes Engine starting — 20 strategies active (8 confirmed, 12 experimental).')
+        tg_send('🚀 Hermes Engine started — 20 strategies active (8 confirmed @ 3 contracts, 12 experimental @ 1 contract).')
         while True:
             now = datetime.now(ET)
             if now.date() != self.today:
@@ -318,11 +418,11 @@ class HermesEngine:
             return
 
         if cfg.spread_type == 'put_spread':
-            legs, credit = self._build_put_spread(df, expiry, cfg.delta_target)
+            legs, credit = self._build_put_spread(df, expiry, cfg.delta_target, cfg.spread_width)
         elif cfg.spread_type == 'call_spread':
-            legs, credit = self._build_call_spread(df, expiry, cfg.delta_target)
+            legs, credit = self._build_call_spread(df, expiry, cfg.delta_target, cfg.spread_width)
         elif cfg.spread_type == 'iron_condor':
-            legs, credit = self._build_iron_condor(df, expiry, cfg.delta_target)
+            legs, credit = self._build_iron_condor(df, expiry, cfg.delta_target, cfg.spread_width)
         else:
             return
 
@@ -335,7 +435,7 @@ class HermesEngine:
         fill         = round(credit * (1.0 - slippage_pct), 2)
 
         for leg in legs:
-            if not self._submit_order(leg.option_symbol, leg.side, MAX_CONTRACTS):
+            if not self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
                 log.error('%s: order failed for %s — aborting trade.', cfg.name, leg.option_symbol)
                 return
 
@@ -352,6 +452,7 @@ class HermesEngine:
             profit_thresh = profit_thresh,
             stop_thresh   = stop_thresh,
             force_exit    = cfg.force_exit_time,
+            contracts     = cfg.contracts,
             entry_state   = {
                 'vix':               ms['vix'],
                 'spy_entry':         ms['spy'],
@@ -369,16 +470,16 @@ class HermesEngine:
         )
         self.positions.append(pos)
         self.entered[cfg.name] = True
-        log.info('Entered %s: credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, fill, profit_thresh, stop_thresh)
+        log.info('Entered %s: %dc credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, cfg.contracts, fill, profit_thresh, stop_thresh)
         tg_send(
-            f"🟢 HERMES ENTRY: {cfg.name} {cfg.spread_type.upper()}\n"
+            f"🟢 HERMES ENTRY: {cfg.name} {cfg.spread_type.upper()} ({cfg.contracts}c)\n"
             f"SPY {ms['spy']:.2f} | VIX {ms['vix']:.2f} | Credit ${fill:.2f}\n"
             f"Target ≤${profit_thresh:.2f} | Stop ≥${stop_thresh:.2f}"
         )
 
     # ── Spread builders ───────────────────────────────────────────────────────
 
-    def _build_put_spread(self, df: pd.DataFrame, expiry: str, delta_target: float) -> Tuple[List[Leg], float]:
+    def _build_put_spread(self, df: pd.DataFrame, expiry: str, delta_target: float, spread_width: float = 2.0) -> Tuple[List[Leg], float]:
         puts = df[df['option_type'] == 'put'].copy()
         if puts.empty:
             return [], 0.0
@@ -387,7 +488,7 @@ class HermesEngine:
             return [], 0.0
         idx   = (puts['delta'].abs() - delta_target).abs().idxmin()
         short = puts.loc[idx]
-        long_strike = round(float(short['strike']) - 2.0, 0)
+        long_strike = round(float(short['strike']) - spread_width, 0)
         long_rows   = puts[puts['strike'] == long_strike]
         if long_rows.empty:
             return [], 0.0
@@ -401,7 +502,7 @@ class HermesEngine:
         ]
         return legs, credit
 
-    def _build_call_spread(self, df: pd.DataFrame, expiry: str, delta_target: float) -> Tuple[List[Leg], float]:
+    def _build_call_spread(self, df: pd.DataFrame, expiry: str, delta_target: float, spread_width: float = 2.0) -> Tuple[List[Leg], float]:
         calls = df[df['option_type'] == 'call'].copy()
         if calls.empty:
             return [], 0.0
@@ -410,7 +511,7 @@ class HermesEngine:
             return [], 0.0
         idx   = (calls['delta'].abs() - delta_target).abs().idxmin()
         short = calls.loc[idx]
-        long_strike = round(float(short['strike']) + 2.0, 0)
+        long_strike = round(float(short['strike']) + spread_width, 0)
         long_rows   = calls[calls['strike'] == long_strike]
         if long_rows.empty:
             return [], 0.0
@@ -424,9 +525,9 @@ class HermesEngine:
         ]
         return legs, credit
 
-    def _build_iron_condor(self, df: pd.DataFrame, expiry: str, delta_target: float) -> Tuple[List[Leg], float]:
-        p_legs, p_credit = self._build_put_spread(df, expiry, delta_target)
-        c_legs, c_credit = self._build_call_spread(df, expiry, delta_target)
+    def _build_iron_condor(self, df: pd.DataFrame, expiry: str, delta_target: float, spread_width: float = 2.0) -> Tuple[List[Leg], float]:
+        p_legs, p_credit = self._build_put_spread(df, expiry, delta_target, spread_width)
+        c_legs, c_credit = self._build_call_spread(df, expiry, delta_target, spread_width)
         if not p_legs or not c_legs:
             return [], 0.0
         return p_legs + c_legs, round(p_credit + c_credit, 2)
@@ -476,7 +577,7 @@ class HermesEngine:
                 log.info('S4 %s: debit $%.2f > $150 max — skip.', ticker, debit)
                 continue
             sym = _occ_symbol(ticker, expiry, 'C', float(atm['strike']))
-            if not self._submit_order(sym, 'buy_to_open', MAX_CONTRACTS):
+            if not self._submit_order(sym, 'buy_to_open', cfg.contracts):
                 continue
             mid      = float(atm['mid']) if float(atm.get('mid', 0)) > 0 else float(atm['ask'])
             slip_pct = round((debit / mid - 1.0) * 100, 1) if mid > 0 else 2.0
@@ -490,6 +591,7 @@ class HermesEngine:
                 profit_thresh = round(debit * (1.0 + cfg.profit_target_pct), 2),
                 stop_thresh   = round(debit * (1.0 - stop_pct), 2),
                 force_exit    = cfg.force_exit_time,
+                contracts     = cfg.contracts,
                 entry_state   = {
                     'vix':               ms['vix'],
                     'spy_entry':         ms['spy'],
@@ -571,45 +673,49 @@ class HermesEngine:
     def _close_position(self, pos: Position, reason: str, exit_val: float, now: datetime) -> None:
         for leg in pos.legs:
             close_side = 'buy_to_close' if leg.side == 'sell_to_open' else 'sell_to_close'
-            self._submit_order(leg.option_symbol, close_side, MAX_CONTRACTS)
+            self._submit_order(leg.option_symbol, close_side, pos.contracts)
 
         if pos.spread_type == 'earnings':
             debit = abs(pos.entry_credit)
-            pnl   = round((exit_val - debit) * 100 * MAX_CONTRACTS, 2)
+            pnl   = round((exit_val - debit) * 100 * pos.contracts, 2)
         else:
-            pnl = round((pos.entry_credit - exit_val) * 100 * MAX_CONTRACTS, 2)
+            pnl = round((pos.entry_credit - exit_val) * 100 * pos.contracts, 2)
 
+        pnl_per_contract = round(pnl / pos.contracts, 2)
         hold_min = int((now - pos.entry_time).total_seconds() / 60)
         self.daily_pnl[pos.strategy] = self.daily_pnl.get(pos.strategy, 0.0) + pnl
         self.total_pnl += pnl
 
         trade = {
-            'strategy':          pos.strategy,
-            'entry_time':        pos.entry_time.isoformat(),
-            'entry_price':       pos.entry_credit,
-            'theoretical_mid':   pos.entry_state.get('theoretical_mid'),
-            'fill_slippage_pct': pos.entry_state.get('fill_slippage_pct'),
-            'vix_entry':         pos.entry_state.get('vix'),
-            'spy_entry':         pos.entry_state.get('spy_entry'),
-            'vwap_entry':        pos.entry_state.get('vwap_entry'),
-            'delta_entry':       pos.entry_state.get('delta_entry'),
-            'theta_entry':       pos.entry_state.get('theta_entry'),
-            'spy_vs_ma50':       pos.entry_state.get('spy_vs_ma50'),
-            'vix_direction':     pos.entry_state.get('vix_direction'),
-            'day_of_week':       pos.entry_state.get('day_of_week'),
-            'days_to_fomc':      pos.entry_state.get('days_to_fomc'),
-            'exit_time':         now.isoformat(),
-            'exit_price':        exit_val,
-            'exit_reason':       reason,
-            'pnl':               pnl,
-            'hold_minutes':      hold_min,
-            'market_regime':     pos.entry_state.get('market_regime'),
+            'strategy':                  pos.strategy,
+            'contracts':                 pos.contracts,
+            'entry_time':                pos.entry_time.isoformat(),
+            'entry_price':               pos.entry_credit,
+            'theoretical_mid':           pos.entry_state.get('theoretical_mid'),
+            'fill_slippage_pct':         pos.entry_state.get('fill_slippage_pct'),
+            'vix_entry':                 pos.entry_state.get('vix'),
+            'spy_entry':                 pos.entry_state.get('spy_entry'),
+            'vwap_entry':                pos.entry_state.get('vwap_entry'),
+            'delta_entry':               pos.entry_state.get('delta_entry'),
+            'theta_entry':               pos.entry_state.get('theta_entry'),
+            'spy_vs_ma50':               pos.entry_state.get('spy_vs_ma50'),
+            'vix_direction':             pos.entry_state.get('vix_direction'),
+            'day_of_week':               pos.entry_state.get('day_of_week'),
+            'days_to_fomc':              pos.entry_state.get('days_to_fomc'),
+            'exit_time':                 now.isoformat(),
+            'exit_price':                exit_val,
+            'exit_reason':               reason,
+            'pnl':                       pnl,
+            'realized_pnl_per_contract': pnl_per_contract,
+            'total_realized_pnl':        round(self.daily_pnl[pos.strategy], 2),
+            'hold_minutes':              hold_min,
+            'market_regime':             pos.entry_state.get('market_regime'),
         }
         self._log_trade(trade)
-        log.info('Closed %s: reason=%s pnl=%.2f hold=%dm', pos.strategy, reason, pnl, hold_min)
+        log.info('Closed %s: reason=%s pnl=%.2f (%.2f/c) hold=%dm', pos.strategy, reason, pnl, pnl_per_contract, hold_min)
         tg_send(
             f"{'🟩' if pnl >= 0 else '🟥'} HERMES EXIT: {pos.strategy} | {reason}\n"
-            f"P&L: {'+' if pnl >= 0 else ''}${pnl:.2f} | Hold: {hold_min}m"
+            f"P&L: {'+' if pnl >= 0 else ''}${pnl:.2f} ({'+' if pnl_per_contract >= 0 else ''}${pnl_per_contract:.2f}/c) | Hold: {hold_min}m"
         )
 
     # ── Tradier sandbox ───────────────────────────────────────────────────────
@@ -660,7 +766,9 @@ class HermesEngine:
         log.info('Daily reset: %s', self.today)
 
     def _strategy_loss_ok(self, name: str) -> bool:
-        return self.daily_pnl.get(name, 0.0) > -MAX_LOSS_PER_STRATEGY
+        cfg   = STRATEGIES.get(name)
+        limit = (cfg.contracts if cfg else 1) * MAX_LOSS_PER_CONTRACT
+        return self.daily_pnl.get(name, 0.0) > -limit
 
     def _total_loss_ok(self) -> bool:
         return self.total_pnl > -MAX_DAILY_LOSS
