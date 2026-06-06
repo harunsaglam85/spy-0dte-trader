@@ -280,6 +280,21 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
+    'T13_thursday_afternoon': StrategyConfig(
+        name='T13_thursday_afternoon', entry_days=frozenset({3}),
+        entry_start=(13, 0), entry_end=(14, 0),
+        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+    ),
+    'T14_vix_transition': StrategyConfig(
+        name='T14_vix_transition', entry_days=frozenset({0, 1, 2, 3, 4}),
+        entry_start=(10, 0), entry_end=(14, 0),
+        spread_type='put_spread', vix_min=17.0, vix_max=20.0, delta_target=0.20,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=2.0,
+        extra={'require_vix_falling': True},
+    ),
 }
 
 
@@ -311,8 +326,8 @@ class HermesEngine:
     # ── Main loop ──────────────────────────────────────────────────────────────
 
     def run(self) -> None:
-        log.info('Hermes Engine starting — 20 strategies active (8 confirmed, 12 experimental).')
-        tg_send('🚀 Hermes Engine started — 20 strategies active (8 confirmed @ 3 contracts, 12 experimental @ 1 contract).')
+        log.info('Hermes Engine starting — 22 strategies active (8 confirmed, 14 experimental).')
+        tg_send('🚀 Hermes Engine started — 22 strategies active (8 confirmed @ 3 contracts, 14 experimental @ 1 contract).')
         while True:
             now = datetime.now(ET)
             if now.date() != self.today:
@@ -331,15 +346,18 @@ class HermesEngine:
     # ── Market state ──────────────────────────────────────────────────────────
 
     def _get_market_state(self, now: datetime) -> dict:
-        spy_q = self.feeds.get_tradier_quote('SPY')
-        spy   = spy_q.get('last', 0.0)
-        vwap  = spy_q.get('vwap', 0.0)
-        vix   = self.feeds.get_vix()
-        ma50  = self._calc_ma50('SPY')
+        spy_q     = self.feeds.get_tradier_quote('SPY')
+        spy       = spy_q.get('last', 0.0)
+        vwap      = spy_q.get('vwap', 0.0)
+        vix       = self.feeds.get_vix()
+        vix_prev  = self._get_vix_yesterday()
+        ma50      = self._calc_ma50('SPY')
         return {
             'timestamp':      now,
             'spy':            spy,
             'vix':            vix,
+            'vix_yesterday':  vix_prev,
+            'vix_falling':    bool(vix < vix_prev) if vix_prev else None,
             'vwap':           vwap,
             'ma50':           ma50,
             'spy_above_vwap': bool(spy > vwap) if vwap else None,
@@ -347,6 +365,15 @@ class HermesEngine:
             'vix_direction':  'neutral',
             'market_regime':  self._regime(vix),
         }
+
+    def _get_vix_yesterday(self) -> float:
+        try:
+            df = self.feeds.get_ticker_daily('VIX', lookback=5)
+            if df.empty or len(df) < 2:
+                return 0.0
+            return float(df['close'].iloc[-2])
+        except Exception:
+            return 0.0
 
     def _calc_ma50(self, symbol: str) -> float:
         try:
@@ -407,6 +434,8 @@ class HermesEngine:
         if x.get('require_spy_above_ma50_and_vwap'):
             if not (ms.get('spy_above_vwap') and ms.get('spy_above_ma50')):
                 return False
+        if x.get('require_vix_falling') and not ms.get('vix_falling'):
+            return False
         return True
 
     # ── Spread entry ──────────────────────────────────────────────────────────

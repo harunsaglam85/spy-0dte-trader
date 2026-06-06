@@ -25,6 +25,7 @@ STRATEGIES   = [
     'T1_thursday_put', 'T2_monday_afternoon', 'T3_wednesday_afternoon', 'T4_friday_morning',
     'T5_tuesday_bear_call', 'T6_thursday_bear_call', 'T7_high_vix',
     'T8_delta_015', 'T9_delta_025', 'T10_wide_spread', 'T11_narrow_spread', 'T12_max_data',
+    'T13_thursday_afternoon', 'T14_vix_transition',
 ]
 VIX_BUCKETS  = [(13, 15), (15, 17), (17, 19), (19, 21), (21, 23)]
 DAYS         = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
