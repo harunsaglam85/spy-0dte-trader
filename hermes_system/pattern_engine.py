@@ -244,7 +244,7 @@ def main() -> None:
 
     # Print quick summary to stdout
     print('\n--- Quick Summary ---')
-    confirmed    = {'R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4'}
+    confirmed    = {'R3A', 'R3B', 'R3D', 'R3E', 'R8', 'R10', 'S4'}
     print(f"  {'Strategy':<26} {'WR':>6} {'n':>5} {'avg$/trade':>11} {'avg$/c':>8} {'total$':>9} {'kill':>6}")
     print(f"  {'-'*26} {'-'*6} {'-'*5} {'-'*11} {'-'*8} {'-'*9} {'-'*6}")
     for name in STRATEGIES:

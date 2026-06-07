@@ -54,7 +54,7 @@ SANDBOX_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
 # ── Risk ───────────────────────────────────────────────────────────────────────
 # Confirmed (3 contracts): max loss $600/day. Experimental (1 contract): $200/day.
 MAX_LOSS_PER_CONTRACT = 200.0
-MAX_DAILY_LOSS        = 5_000.0   # total paper money daily stop — halts ALL strategies
+MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL strategies
 
 ET = pytz.timezone('America/New_York')
 
@@ -137,7 +137,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=3, spread_width=2.0,
+        contracts=4, spread_width=2.0,
     ),
     'R3B': StrategyConfig(
         name='R3B', entry_days=frozenset({2}),
@@ -159,7 +159,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='iron_condor', vix_min=13.0, vix_max=18.0, delta_target=0.16,
         profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 30),
-        contracts=3, spread_width=2.0,
+        contracts=1, spread_width=2.0,
     ),
     'R8': StrategyConfig(
         name='R8', entry_days=frozenset({4}),
@@ -174,7 +174,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 45), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=3, spread_width=2.0,
+        contracts=5, spread_width=2.0,
         extra={'require_spy_above_ma50_and_vwap': True},
     ),
     'S4': StrategyConfig(
