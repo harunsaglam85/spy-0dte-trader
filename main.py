@@ -4,6 +4,7 @@ Polls every 5 minutes during market hours; manages all strategies,
 kill switches, daily resets, and end-of-day reporting.
 """
 
+import io
 import os
 import sys
 import time
@@ -16,8 +17,11 @@ from pathlib import Path
 from logging.handlers import RotatingFileHandler
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import pandas as pd
 import pytz
+import requests
 import schedule
+import yfinance as yf
 from dotenv import load_dotenv
 
 from core.database import Database
@@ -43,6 +47,8 @@ from core.telegram_alerts import (
 # ---------------------------------------------------------------------------
 NY_TZ = pytz.timezone("America/New_York")
 KILL_FILE = Path("/tmp/kill_all")
+CONTANGO_THRESHOLD = 1.05
+VIX3M_CBOE_URL     = "https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv"
 MARKET_OPEN = (9, 30)
 MARKET_CLOSE = (16, 0)
 PRE_MARKET = (8, 0)
@@ -241,6 +247,7 @@ class CloudTrader:
         self._spy_price_yesterday: float = 0.0
         self._sentiment_score: float = 0.0
         self._daily_pnl: dict = {name: 0.0 for name in self.strategies}
+        self._contango: Optional[bool] = None
 
         # Graceful shutdown
         signal.signal(signal.SIGTERM, self._handle_signal)
@@ -317,6 +324,12 @@ class CloudTrader:
         except Exception as exc:
             self.logger.error("Could not fetch VIX/SPY during pre-market: %s", exc)
 
+        # Prime VIX term structure cache — alerts Telegram if backwardation
+        try:
+            self._check_term_structure()
+        except Exception as exc:
+            self.logger.error("Term structure check failed during pre-market: %s", exc)
+
         # Notify strategies about today's earnings
         try:
             for name, strat in self.strategies.items():
@@ -352,8 +365,67 @@ class CloudTrader:
 
         self._daily_pnl = {name: 0.0 for name in self.strategies}
         self._paused_strategies.clear()
+        self._contango = None
         self._daily_reset_date = today
         self.logger.info("Daily state reset complete")
+
+    # ------------------------------------------------------------------
+    # VIX term structure filter
+    # ------------------------------------------------------------------
+
+    def _fetch_vix3m(self) -> float:
+        try:
+            info = yf.Ticker("^VIX3M").fast_info
+            price = float(info.get("last_price") or info.get("previousClose") or 0)
+            if price > 0:
+                return price
+        except Exception as exc:
+            self.logger.warning("yfinance VIX3M failed: %s — trying CBOE fallback.", exc)
+        try:
+            resp = requests.get(VIX3M_CBOE_URL, timeout=15)
+            resp.raise_for_status()
+            df = pd.read_csv(io.StringIO(resp.text))
+            df.columns = df.columns.str.strip()
+            return float(df["CLOSE"].iloc[-1])
+        except Exception as exc:
+            self.logger.error("CBOE VIX3M fallback also failed: %s", exc)
+            return 0.0
+
+    def _check_term_structure(self) -> bool:
+        """Fetch VIX3M/VIX ratio, cache for the day, send Telegram on backwardation.
+        Returns True (contango — trade normally) or False (backwardation — skip entries)."""
+        if self._contango is not None:
+            return self._contango
+
+        vix3m = self._fetch_vix3m()
+        vix   = self.feeds.get_vix()
+
+        if vix3m <= 0 or vix <= 0:
+            self.logger.warning(
+                "Term structure check incomplete (VIX3M=%.2f VIX=%.2f) — defaulting to contango.",
+                vix3m, vix,
+            )
+            self._contango = True
+            return True
+
+        ratio       = vix3m / vix
+        is_contango = ratio >= CONTANGO_THRESHOLD
+        self._contango = is_contango
+
+        self.logger.info(
+            "VIX term structure: VIX3M=%.2f VIX=%.2f ratio=%.4f regime=%s",
+            vix3m, vix, ratio, "CONTANGO" if is_contango else "BACKWARDATION",
+        )
+
+        if not is_contango:
+            self.logger.warning("Backwardation regime — skipping all strategies today")
+            try:
+                from core.telegram_alerts import send as tg_send
+                tg_send(f"⚠️ Backwardation detected (ratio={ratio:.2f}) — no trades today")
+            except Exception as exc:
+                self.logger.error("Telegram alert failed: %s", exc)
+
+        return is_contango
 
     # ------------------------------------------------------------------
     # Strategy cycle
@@ -374,6 +446,10 @@ class CloudTrader:
             market_state.get("vix", 0.0),
             market_state.get("spy_price", 0.0),
         )
+
+        if not self._check_term_structure():
+            self.logger.info("Backwardation regime — all strategy signal checks skipped today.")
+            return
 
         for name, strat in self.strategies.items():
             if name in self._paused_strategies:

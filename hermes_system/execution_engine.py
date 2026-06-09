@@ -18,9 +18,12 @@ from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
+import io
+
 import pandas as pd
 import pytz
 import requests
+import yfinance as yf
 from dotenv import load_dotenv
 
 from core.data_feeds import DataFeeds
@@ -68,6 +71,9 @@ CRASH_WINDOW_MINUTES = 60
 RESTART_DELAY_SECS   = 30
 
 ET = pytz.timezone('America/New_York')
+
+CONTANGO_THRESHOLD = 1.05
+VIX3M_CBOE_URL     = 'https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv'
 
 # ── FOMC meeting dates 2025-2026 ───────────────────────────────────────────────
 FOMC_DATES: frozenset = frozenset({
@@ -310,6 +316,8 @@ class HermesEngine:
             'Authorization': f'Bearer {SANDBOX_KEY}',
             'Accept':        'application/json',
         }
+        self._contango_today: Optional[bool] = None
+        self._contango_date:  Optional[date] = None
         self._load_positions()
 
     # ── Main loop (watchdog) ──────────────────────────────────────────────────
@@ -408,9 +416,61 @@ class HermesEngine:
         if vix < 25:  return 'elevated'
         return 'high_vol'
 
+    # ── VIX term structure filter ─────────────────────────────────────────────
+
+    def _get_vix3m(self) -> float:
+        try:
+            info = yf.Ticker('^VIX3M').fast_info
+            price = float(info.get('last_price') or info.get('previousClose') or 0)
+            if price > 0:
+                return price
+        except Exception as exc:
+            log.warning('yfinance VIX3M failed: %s — trying CBOE fallback.', exc)
+        try:
+            resp = requests.get(VIX3M_CBOE_URL, timeout=15)
+            resp.raise_for_status()
+            df = pd.read_csv(io.StringIO(resp.text))
+            df.columns = df.columns.str.strip()
+            return float(df['CLOSE'].iloc[-1])
+        except Exception as exc:
+            log.error('CBOE VIX3M fallback also failed: %s', exc)
+            return 0.0
+
+    def _check_term_structure(self) -> bool:
+        """Returns True (contango — trade normally) or False (backwardation — skip all entries).
+        Result is cached for the current trading day."""
+        today = date.today()
+        if self._contango_date == today and self._contango_today is not None:
+            return self._contango_today
+
+        vix3m = self._get_vix3m()
+        vix   = self.feeds.get_vix()
+
+        if vix3m <= 0 or vix <= 0:
+            log.warning('Term structure check incomplete (VIX3M=%.2f VIX=%.2f) — defaulting to contango.', vix3m, vix)
+            self._contango_today = True
+            self._contango_date  = today
+            return True
+
+        ratio       = vix3m / vix
+        is_contango = ratio >= CONTANGO_THRESHOLD
+        self._contango_today = is_contango
+        self._contango_date  = today
+
+        log.info('VIX term structure: VIX3M=%.2f VIX=%.2f ratio=%.4f regime=%s',
+                 vix3m, vix, ratio, 'CONTANGO' if is_contango else 'BACKWARDATION')
+
+        if not is_contango:
+            log.warning('Backwardation regime — skipping all strategies today')
+            tg_send(f'⚠️ Backwardation detected (ratio={ratio:.2f}) — no trades today')
+
+        return is_contango
+
     # ── Entry gate ────────────────────────────────────────────────────────────
 
     def _check_entries(self, ms: dict, now: datetime) -> None:
+        if not self._check_term_structure():
+            return
         if not self._total_loss_ok():
             log.warning('Daily loss limit hit — skipping all entries.')
             return
@@ -951,11 +1011,13 @@ class HermesEngine:
         path.write_text(json.dumps(trades, indent=2, default=str))
 
     def _reset_daily(self) -> None:
-        self.today       = date.today()
-        self.daily_pnl   = {}
-        self.total_pnl   = 0.0
-        self.entered     = {}
-        self._sweep_done = False
+        self.today           = date.today()
+        self.daily_pnl       = {}
+        self.total_pnl       = 0.0
+        self.entered         = {}
+        self._sweep_done     = False
+        self._contango_today = None
+        self._contango_date  = None
         log.info('Daily reset: %s', self.today)
 
     def _strategy_loss_ok(self, name: str) -> bool:
