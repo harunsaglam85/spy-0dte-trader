@@ -151,7 +151,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     # ── Confirmed strategies — 3 contracts each ($600/day max loss) ────────────
     'R3A': StrategyConfig(
         name='R3A', entry_days=frozenset({0}),
-        entry_start=(10, 30), entry_end=(10, 45),
+        entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=4, spread_width=2.0,
@@ -165,7 +165,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     ),
     'R3D': StrategyConfig(
         name='R3D', entry_days=frozenset({0, 2, 4}),
-        entry_start=(10, 30), entry_end=(10, 45),
+        entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=3, spread_width=2.0,
@@ -188,7 +188,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     ),
     'R10': StrategyConfig(
         name='R10', entry_days=frozenset({1}),
-        entry_start=(10, 45), entry_end=(11, 0),
+        entry_start=(10, 30), entry_end=(11, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=5, spread_width=2.0,
