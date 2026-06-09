@@ -266,33 +266,58 @@ class DataFeeds:
             )
             return []
 
-    def get_next_expiry(self, symbol: str = "SPY", dte_target: int = 5,
+    def get_next_expiry(self, symbol: str = "SPY", dte_target: int = 0,
                         weekly: bool = False) -> str:
-        """Return the nearest expiration that is at least *dte_target* days away.
+        """Return today's date if it is a valid expiry, otherwise the next valid expiry.
 
-        If *weekly* is True, return the nearest Friday expiration regardless of
-        *dte_target* (used by weekly/0DTE strategies).
+        Uses includeAllRoots=true to capture all SPY expirations (Mon/Wed/Fri).
+        When dte_target > 0, returns the first expiry at least that many days out.
+        When weekly=True, returns the first Friday expiry on or after today.
 
         Returns
         -------
         str  YYYY-MM-DD, or '' if no suitable expiry is found.
         """
-        expirations = self.get_tradier_expirations(symbol)
+        data = self._tradier_get(
+            "/markets/options/expirations",
+            params={"symbol": symbol, "includeAllRoots": "true", "strikes": "false"},
+        )
+        try:
+            expirations = data.get("expirations", {}).get("date", [])
+            if isinstance(expirations, str):
+                expirations = [expirations]
+            expirations = sorted(expirations)
+        except (KeyError, TypeError) as exc:
+            self.logger.error("get_next_expiry parse error for %s: %s", symbol, exc)
+            return ""
+
         today = date.today()
+        today_str = today.isoformat()
+
+        # 0DTE default path: return today if valid, else next expiry after today
+        if not weekly and not dte_target:
+            if today_str in expirations:
+                return today_str
+            for exp_str in expirations:
+                if exp_str > today_str:
+                    return exp_str
+            self.logger.warning("get_next_expiry: no expiry found for %s", symbol)
+            return ""
+
+        # Legacy paths for callers that specify weekly or dte_target
         for exp_str in expirations:
             try:
                 exp_date = date.fromisoformat(exp_str)
                 if weekly:
-                    # weekday() == 4 is Friday
                     if exp_date >= today and exp_date.weekday() == 4:
                         return exp_str
-                else:
-                    if (exp_date - today).days >= dte_target:
-                        return exp_str
+                elif dte_target and (exp_date - today).days >= dte_target:
+                    return exp_str
             except ValueError:
                 continue
+
         self.logger.warning(
-            "get_next_expiry: no expiry found for %s (weekly=%s, dte_target=%d)",
+            "get_next_expiry: no expiry found for %s (weekly=%s, dte_target=%s)",
             symbol, weekly, dte_target,
         )
         return ""
