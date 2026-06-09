@@ -1,0 +1,91 @@
+Traceback (most recent call last):
+  File "/root/spy-0dte-trader/hermes_research_engine.py", line 1422, in main
+    all_trades = h['runner'](**kwargs)
+  File "/root/spy-0dte-trader/hermes_research_engine.py", line 970, in run_h8_ma50_bounce
+    if not (0.995 * prev_m50 <= prev_px <= 1.005 * prev_m50): continue
+TypeError: unsupported operand type(s) for *: 'float' and 'NoneType'
+
+======================================================================
+  HERMES AUTONOMOUS RESEARCH ENGINE
+  Started: 2026-06-05 02:51:02
+======================================================================
+
+  Loading market data...
+  Loaded: 1357 trading days | 1143 ThetaData expirations
+  VIX range: 11.9 – 52.3
+  IS: 627 days | OOS: 480 days | Blind 2025: 250 days
+
+
+  [1/10] Running H1: Pre-FOMC Drift...
+  Hypothesis: Buy 0DTE ATM calls on FOMC morning, exit by 1:45 PM (Lucca-Moench drift)
+  Total:  N=  26  WR= 11.5%  P&L=$ -1,541.20  PF= 0.14  Sharpe=-16.81
+  OOS:    N=   9  WR= 22.2%  P&L=$   -364.24  PF= 0.32  Sharpe=-8.65
+  Status: ❌ DEAD — OOS N=9 < 20 (insufficient trades)
+
+  [2/10] Running H2: VIX Reversal Iron Butterfly...
+  Hypothesis: 0DTE iron butterfly on day VIX turns down from spike (IVR>70)
+  Total:  N=  15  WR= 53.3%  P&L=$   -387.46  PF= 0.42  Sharpe=-5.57
+  OOS:    N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  Status: ❌ DEAD — OOS N=0 < 20 (insufficient trades)
+
+  [3/10] Running H3: Monday Gap-Fill...
+  Hypothesis: Buy 0DTE calls on Monday gap-down, target gap fill by 11:30 AM
+  Total:  N=   5  WR= 80.0%  P&L=$    +62.34  PF= 1.61  Sharpe= 2.62
+  OOS:    N=   2  WR=100.0%  P&L=$     +9.75  PF=  inf  Sharpe=22.75
+  Status: ❌ DEAD — OOS N=2 < 20 (insufficient trades)
+
+  [4/10] Running H4: Overnight Gap Momentum...
+  Hypothesis: Buy 0DTE calls when SPY gaps up 0.5–2.5% at open, exit by 12:30
+  Total:  N= 131  WR= 40.5%  P&L=$ -3,258.96  PF= 0.53  Sharpe=-4.62
+  OOS:    N=  55  WR= 38.2%  P&L=$ -1,672.52  PF= 0.46  Sharpe=-5.71
+  Status: ❌ DEAD — OOS Sharpe=-5.71 < 1.0
+
+  [5/10] Running H5: CPI Hot-Print Put Spread...
+  Hypothesis: Debit put spread 2 days before known-hot CPI prints
+  Total:  N=  25  WR= 36.0%  P&L=$ -1,105.94  PF= 0.46  Sharpe=-5.94
+  OOS:    N=   2  WR=  0.0%  P&L=$   -185.41  PF=  N/A  Sharpe=-24.10
+  Status: ❌ DEAD — OOS N=2 < 20 (insufficient trades)
+
+  [6/10] Running H6: Friday PM Premium Decay...
+  Hypothesis: Sell 0DTE put spread on Friday 1 PM, capture accelerated theta
+  Total:  N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  OOS:    N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  Status: ❌ DEAD — OOS N=0 < 20 (insufficient trades)
+
+  [7/10] Running H7: Post-Earnings IV Collapse...
+  Hypothesis: Sell put spreads on NVDA/TSLA etc day after earnings (IV crush)
+  Total:  N= 174  WR= 60.3%  P&L=$ -5,518.26  PF= 0.72  Sharpe=-1.90
+  OOS:    N=  63  WR= 57.1%  P&L=$ -3,290.60  PF= 0.63  Sharpe=-2.86
+  Status: ❌ DEAD — OOS Sharpe=-2.86 < 1.0
+
+  [8/10] Running H8: MA50 Bounce...
+  Hypothesis: Buy 0DTE calls when SPY bounces off MA50 on elevated VIX
+  ERROR: unsupported operand type(s) for *: 'float' and 'NoneType'
+  Total:  N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  OOS:    N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  Status: ❌ DEAD — OOS N=0 < 20 (insufficient trades)
+
+  [9/10] Running H9: Wednesday Credit Spread...
+  Hypothesis: Sell 0DTE put spread Wednesday 10:30 AM, VIX 13–20
+  Total:  N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  OOS:    N=   0  WR=  0.0%  P&L=$     +0.00  PF=  N/A  Sharpe= 0.00
+  Status: ❌ DEAD — OOS N=0 < 20 (insufficient trades)
+
+  [10/10] Running H10: VWAP-Cross Momentum...
+  Hypothesis: Buy 0DTE calls on bullish VWAP cross with 2x volume surge
+  Total:  N=  76  WR= 21.1%  P&L=$ -2,056.47  PF= 0.19  Sharpe=-11.20
+  OOS:    N=  31  WR= 25.8%  P&L=$   -554.72  PF= 0.32  Sharpe=-7.44
+  Status: ❌ DEAD — OOS Sharpe=-7.44 < 1.0
+
+======================================================================
+  RESEARCH COMPLETE
+======================================================================
+  Total hypotheses tested: 10
+  Survivors: 0
+  Dead: 10
+
+  Journal: /root/spy-0dte-trader/hermes_research/journal.md
+  Results: /root/spy-0dte-trader/hermes_research/results/
+
+  Done.
+

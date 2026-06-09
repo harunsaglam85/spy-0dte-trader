@@ -1,0 +1,89 @@
+Loading market data...
+  1357 days loaded
+  Downloading VIX3M from yfinance...
+  VIX3M cached: 1357 days
+  Contango ratio: 1357 days with data
+  Ratio range: 0.785 – 1.327, avg 1.129
+  Contango (>=1.05): 1108 days | Backwardation (<1.00): 65 days
+
+Running backtest variants...
+  Baseline (no filter): N=533, elapsed 0.3s
+  Contango only (>=1.05): N=491, elapsed 0.3s
+  Strong contango (>=1.10): N=412, elapsed 0.3s
+  No backwardation (>=1.00): N=530, elapsed 0.3s
+
+Stop-out ratio analysis (baseline trades)...
+
+=================================================================
+  VIX TERM STRUCTURE BACKTEST — SPY 0DTE Credit Spread
+  Run: 2026-06-09 13:32:12
+=================================================================
+
+  Hypothesis: Trading only in VIX contango (VIX3M/VIX >= 1.05)
+  improves WR and Sharpe by avoiding stress-regime entries.
+
+  VIX3M data: 1357 days
+  Contango days (>=1.05): 1108  |  Backwardation (<1.00): 65
+
+=================================================================
+  VARIANT COMPARISON (R2 strategy, Mon/Wed/Fri, VIX 13-22)
+=================================================================
+  Variant                                 N      WR        P&L     PF  Sharpe
+  --------------------------------------------------------------
+  Baseline (no filter)                  533   83.9% $ +5692.13   4.37   12.31
+  Contango only (>=1.05)                491   84.9% $ +5415.76   4.68   13.01
+  Strong contango (>=1.10)              412   86.2% $ +4654.31   4.99   13.65
+  No backwardation (>=1.00)             530   84.0% $ +5678.56   4.40   12.38
+
+  OUT-OF-SAMPLE (Jul 2023–2024, excl 2025 blind):
+  Variant                                 N      WR        P&L  Sharpe
+  -------------------------------------------------------
+  Baseline (no filter)                  205   82.0% $ +2136.49   11.41
+  Contango only (>=1.05)                177   84.2% $ +1975.12   12.61
+  Strong contango (>=1.10)              135   83.7% $ +1464.30   11.81
+  No backwardation (>=1.00)             204   82.4% $ +2157.35   11.68
+
+  BLIND 2025 (held-out year):
+  Variant                                 N      WR        P&L  Sharpe
+  -------------------------------------------------------
+  Baseline (no filter)                  127   83.5% $ +1334.30   11.20
+  Contango only (>=1.05)                116   83.6% $ +1235.38   11.52
+  Strong contango (>=1.10)               94   87.2% $ +1122.68   14.45
+  No backwardation (>=1.00)             125   83.2% $ +1299.87   11.02
+
+=================================================================
+  STOP-OUT ANALYSIS — Where do losses cluster by contango ratio?
+=================================================================
+  Regime                             N      WR        P&L  Stops
+  ---------------------------------------------------------
+  backwardation (<1.00)              3   66.7% $   +13.57      1
+  contango (1.05-1.10)              79   78.5% $  +761.45     16
+  neutral (1.00-1.05)               39   71.8% $  +262.80      9
+  strong contango (>=1.10)         412   86.2% $ +4654.31     57
+
+=================================================================
+  CONTANGO FILTER — Year-by-Year Breakdown
+=================================================================
+  Year         N      WR        P&L
+  -----------------------------------
+  2021       113   94.7% $ +1534.78
+  2022        27   77.8% $  +225.65
+  2023       117   76.1% $  +912.72
+  2024        73   84.9% $  +859.53
+  2025       116   83.6% $ +1235.38
+  2026        45   91.1% $  +647.70
+
+=================================================================
+  VERDICT
+=================================================================
+
+  WR delta (contango vs baseline, OOS): +2.2%
+  Sharpe delta: +1.21
+  Trades removed by filter (OOS): 28
+
+  CONFIRMED — Contango filter adds meaningful edge.
+  Recommendation: ADD to all credit spread strategies as entry gate.
+
+=================================================================
+
+  Report saved: /root/spy-0dte-trader/hermes_research/vix_ts_report.txt

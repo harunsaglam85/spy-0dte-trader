@@ -1,0 +1,78 @@
+
+======================================================================
+  HERMES RESEARCH ENGINE — ROUND 2
+  Started: 2026-06-05 02:56:52
+  Applying lessons from Round 1 (10/10 dead)
+======================================================================
+
+  Loading market data...
+  1357 days | 1143 expirations | VIX 11.9–52.3
+  IS: 627 | OOS: 480 | Blind: 250
+
+
+  [1/10] R1: Monday Gap-Fill (Relaxed)
+  Buy 0DTE calls on Mon gap-down > 0.15%, exit 12:30 PM. Signal: 80% WR in R1 (too few trades).
+  Full: N=   6 WR= 83.3% P&L=$   +369.16 Sharpe= 6.17
+  OOS:  N=   4 WR= 75.0% P&L=$   +256.06 Sharpe= 4.98
+  ❌ DEAD: OOS N=4 < 20
+
+  [2/10] R2: Credit Spread (Fixed Delta)
+  Mon/Wed/Fri 10:30 AM put spread, FIXED strike formula with proper delta search.
+  Full: N= 524 WR= 84.5% P&L=$ +5,675.09 Sharpe=13.05
+  OOS:  N= 205 WR= 82.4% P&L=$ +2,021.82 Sharpe=11.66
+  ✅ ALIVE
+
+  [3/10] R3: Morning Gap Fade
+  Fade gap-ups > 0.5% by buying puts. Learned from R1 H4: gaps fail to continue.
+  Full: N= 163 WR= 25.8% P&L=$ -6,878.33 Sharpe=-7.92
+  OOS:  N=  59 WR= 27.1% P&L=$ -1,888.21 Sharpe=-5.42
+  ❌ DEAD: OOS Sharpe=-5.42 < 1.0
+
+  [4/10] R4: Post-FOMC IV Collapse
+  Sell 0DTE put spread day after FOMC while IV premium still elevated.
+  Full: N=  38 WR= 73.7% P&L=$   +262.64 Sharpe= 5.37
+  OOS:  N=  10 WR= 70.0% P&L=$    +44.57 Sharpe= 3.22
+  ❌ DEAD: OOS N=10 < 20
+
+  [5/10] R5: 3+ Red Days Reversal
+  Buy 0DTE calls after 3 consecutive red days + gap-up open.
+  Full: N=  41 WR= 34.1% P&L=$ -1,698.15 Sharpe=-4.70
+  OOS:  N=  15 WR= 40.0% P&L=$   -545.03 Sharpe=-3.44
+  ❌ DEAD: OOS N=15 < 20
+
+  [6/10] R6: ATR Breakout Momentum
+  Buy calls when SPY gaps above 5-day range by 0.5–2x ATR.
+  Full: N=  14 WR= 21.4% P&L=$   -713.30 Sharpe=-11.48
+  OOS:  N=   8 WR= 25.0% P&L=$   -333.02 Sharpe=-8.97
+  ❌ DEAD: OOS N=8 < 20
+
+  [7/10] R7: Opening Range Breakout
+  Buy 0DTE directional option on 30-min OR breakout with volume surge.
+  Full: N= 399 WR= 26.3% P&L=$-13,362.97 Sharpe=-6.75
+  OOS:  N= 164 WR= 30.5% P&L=$ -4,544.66 Sharpe=-5.55
+  ❌ DEAD: OOS Sharpe=-5.55 < 1.0
+
+  [8/10] R8: Friday Credit + VWAP Filter
+  Friday 1 PM put spread with VWAP bullish confirmation (fixed from H6).
+  Full: N= 128 WR= 87.5% P&L=$ +1,459.80 Sharpe=13.95
+  OOS:  N=  46 WR= 80.4% P&L=$   +393.75 Sharpe= 8.48
+  ✅ ALIVE
+
+  [9/10] R9: High-VIX Credit Spread
+  0DTE very-OTM put spread (0.12 delta) on VIX 20-32 non-event days.
+  Full: N=   1 WR=100.0% P&L=$    +15.58 Sharpe= 0.00
+  OOS:  N=   1 WR=100.0% P&L=$    +15.58 Sharpe= 0.00
+  ❌ DEAD: OOS N=1 < 20
+
+  [10/10] R10: Tuesday Decay + VWAP
+  Tuesday 0DTE put spread, 10:45 AM, above VWAP + MA50 regime filter.
+  Full: N=  80 WR= 87.5% P&L=$   +859.79 Sharpe=15.43
+  OOS:  N=  33 WR= 84.8% P&L=$   +296.02 Sharpe=11.91
+  ✅ ALIVE
+
+======================================================================
+  ROUND 2 COMPLETE: 3/10 survived
+======================================================================
+
+  Journal: /root/spy-0dte-trader/hermes_research/journal_r2.md
+
