@@ -1,0 +1,81 @@
+============================================================
+VIX TERM STRUCTURE ANALYSIS
+Contango threshold: VIX3M/VIX >= 1.05
+VIX3M date range : 2009-09-18 to 2026-06-08
+Trades matched   : 4021 of 4021
+============================================================
+
+[ OVERALL ]
+  Trades  : 4021
+  Win Rate: 53.5%
+  Total P&L: $125,798.22
+  Avg P&L : $31.29
+  Sharpe  : 1.249
+
+[ CONTANGO (ratio >= 1.05) ]
+  Trades  : 3398
+  Win Rate: 55.7%
+  Total P&L: $135,806.57
+  Avg P&L : $39.97
+  Sharpe  : 1.516
+
+[ BACKWARDATION (ratio < 1.05) ]
+  Trades  : 623
+  Win Rate: 41.6%
+  Total P&L: $-10,008.35
+  Avg P&L : $-16.06
+  Sharpe  : -1.020
+
+
+[ PER-STRATEGY BREAKDOWN ]
+
+--- S10_TuesdayVWAP ---
+  Contango     : n=139, WR=79.1%, P&L=$923.47, Sharpe=3.095
+  Backwardation: n=4, WR=100.0%, P&L=$84.41, Sharpe=31.824
+
+--- S1_CreditSpread ---
+  Contango     : n=506, WR=70.2%, P&L=$2837.28, Sharpe=2.137
+  Backwardation: n=52, WR=65.4%, P&L=$-258.20, Sharpe=-1.855
+
+--- S2_5DTE_Momentum ---
+  Contango     : n=882, WR=37.4%, P&L=$30819.29, Sharpe=2.370
+  Backwardation: n=181, WR=37.6%, P&L=$7254.36, Sharpe=1.685
+
+--- S3_CPI_Catalyst ---
+  Contango     : n=42, WR=35.7%, P&L=$5011.97, Sharpe=2.629
+  Backwardation: n=8, WR=50.0%, P&L=$-1517.97, Sharpe=-5.012
+
+--- S3_FOMC_Catalyst ---
+  Contango     : n=46, WR=39.1%, P&L=$260.56, Sharpe=0.162
+  Backwardation: n=4, WR=0.0%, P&L=$-1946.37, Sharpe=-18.091
+
+--- S4_Earnings ---
+  Contango     : n=166, WR=54.2%, P&L=$103151.44, Sharpe=6.001
+  Backwardation: n=14, WR=28.6%, P&L=$193.08, Sharpe=0.297
+
+--- S5_IronCondor ---
+  Contango     : n=78, WR=33.3%, P&L=$-3144.86, Sharpe=-16.240
+  Backwardation: n=216, WR=31.9%, P&L=$-9881.34, Sharpe=-16.189
+
+--- S6_MondayPut ---
+  Contango     : n=231, WR=74.0%, P&L=$2012.87, Sharpe=3.479
+  Backwardation: n=26, WR=69.2%, P&L=$54.08, Sharpe=0.813
+
+--- S7_BearCall ---
+  Contango     : n=656, WR=49.5%, P&L=$-11059.34, Sharpe=-5.221
+  Backwardation: n=70, WR=38.6%, P&L=$-3755.10, Sharpe=-10.967
+
+--- S8_WedCondor ---
+  Contango     : n=228, WR=65.8%, P&L=$2102.90, Sharpe=2.643
+  Backwardation: n=2, WR=50.0%, P&L=$27.24, Sharpe=4.773
+
+--- S9_NoFOMC ---
+  Contango     : n=424, WR=71.5%, P&L=$2890.99, Sharpe=2.613
+  Backwardation: n=46, WR=65.2%, P&L=$-262.54, Sharpe=-2.097
+
+[ REGIME DISTRIBUTION ]
+  Contango days     : 3416 / 4205
+  Backwardation days: 789 / 4205
+  Avg ratio         : 1.1249
+  Median ratio      : 1.1300
+============================================================
