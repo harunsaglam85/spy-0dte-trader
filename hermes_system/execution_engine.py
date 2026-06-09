@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import time
+import traceback
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 from pathlib import Path
@@ -29,9 +30,10 @@ from core.telegram_alerts import send as tg_send
 load_dotenv('/root/spy-0dte-trader/.env')
 
 # ── Paths ──────────────────────────────────────────────────────────────────────
-HERMES_ROOT = Path('/root/hermes_system')
-TRADES_DIR  = HERMES_ROOT / 'trades'
-LOG_DIR     = HERMES_ROOT / 'logs'
+HERMES_ROOT    = Path('/root/hermes_system')
+TRADES_DIR     = HERMES_ROOT / 'trades'
+LOG_DIR        = HERMES_ROOT / 'logs'
+POSITIONS_FILE = HERMES_ROOT / 'positions.json'
 for _d in (TRADES_DIR, LOG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -55,6 +57,15 @@ SANDBOX_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
 # Confirmed (3 contracts): max loss $600/day. Experimental (1 contract): $200/day.
 MAX_LOSS_PER_CONTRACT = 200.0
 MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL strategies
+
+# ── Credit gate (BUG 4) ────────────────────────────────────────────────────────
+# Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
+MIN_CREDIT = 0.20
+
+# ── Watchdog limits (BUG 2) ───────────────────────────────────────────────────
+MAX_CRASHES_PER_HOUR = 5
+CRASH_WINDOW_MINUTES = 60
+RESTART_DELAY_SECS   = 30
 
 ET = pytz.timezone('America/New_York')
 
@@ -294,16 +305,50 @@ class HermesEngine:
         self.total_pnl:  float = 0.0
         self.today:      date = date.today()
         self.entered:    Dict[str, bool] = {}
+        self._sweep_done: bool = False
         self._sb_hdrs    = {
             'Authorization': f'Bearer {SANDBOX_KEY}',
             'Accept':        'application/json',
         }
+        self._load_positions()
 
-    # ── Main loop ──────────────────────────────────────────────────────────────
+    # ── Main loop (watchdog) ──────────────────────────────────────────────────
 
     def run(self) -> None:
         log.info('Hermes Engine starting — 22 strategies active (8 confirmed, 14 experimental).')
         tg_send('🚀 Hermes Engine started — 22 strategies active (8 confirmed @ 3 contracts, 14 experimental @ 1 contract).')
+        crash_times: List[datetime] = []
+        while True:
+            try:
+                self._run_loop()
+            except Exception as exc:
+                tb        = traceback.format_exc()
+                now_et    = datetime.now(ET)
+                crash_times.append(now_et)
+                cutoff    = now_et - timedelta(minutes=CRASH_WINDOW_MINUTES)
+                crash_times = [t for t in crash_times if t > cutoff]
+
+                crash_log = LOG_DIR / 'crash.log'
+                with crash_log.open('a') as f:
+                    f.write(f'\n[{now_et.isoformat()}] CRASH #{len(crash_times)}\n{tb}\n')
+
+                error_short = str(exc)[:200]
+
+                if len(crash_times) >= MAX_CRASHES_PER_HOUR:
+                    msg = (
+                        f'🚨 Engine unstable — manual intervention needed. '
+                        f'{len(crash_times)} crashes in {CRASH_WINDOW_MINUTES} minutes.'
+                    )
+                    log.critical('%s\n%s', msg, tb)
+                    tg_send(msg)
+                    return
+
+                msg = f'⚠️ Engine crashed — restarting in {RESTART_DELAY_SECS}s. Error: {error_short}'
+                log.error('%s\n%s', msg, tb)
+                tg_send(msg)
+                time.sleep(RESTART_DELAY_SECS)
+
+    def _run_loop(self) -> None:
         while True:
             now = datetime.now(ET)
             if now.date() != self.today:
@@ -311,12 +356,9 @@ class HermesEngine:
             if not self._is_market_hours(now):
                 time.sleep(60)
                 continue
-            try:
-                ms = self._get_market_state(now)
-                self._check_entries(ms, now)
-                self._check_exits(ms, now)
-            except Exception as exc:
-                log.error('Loop error: %s', exc, exc_info=True)
+            ms = self._get_market_state(now)
+            self._check_entries(ms, now)
+            self._check_exits(ms, now)
             time.sleep(60)
 
     # ── Market state ──────────────────────────────────────────────────────────
@@ -431,8 +473,8 @@ class HermesEngine:
         else:
             return
 
-        if not legs or credit <= 0.02:
-            log.info('%s: credit too low (%.2f) — no entry.', cfg.name, credit)
+        if not legs or credit < MIN_CREDIT:
+            log.info('%s: credit $%.2f below minimum $%.2f — skip.', cfg.name, credit, MIN_CREDIT)
             return
 
         theoretical  = credit
@@ -475,6 +517,7 @@ class HermesEngine:
         )
         self.positions.append(pos)
         self.entered[cfg.name] = True
+        self._save_positions()
         log.info('Entered %s: %dc credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, cfg.contracts, fill, profit_thresh, stop_thresh)
         tg_send(
             f"🟢 HERMES ENTRY: {cfg.name} {cfg.spread_type.upper()} ({cfg.contracts}c)\n"
@@ -618,6 +661,7 @@ class HermesEngine:
             )
             self.positions.append(pos)
             self.entered[entry_key] = True
+            self._save_positions()
             log.info('S4 entered %s: debit=%.2f exp=%s earnings=%s', ticker, debit, expiry, next_earn)
             tg_send(
                 f"🟢 HERMES S4: {ticker} earnings call\n"
@@ -636,6 +680,11 @@ class HermesEngine:
             else:
                 remaining.append(pos)
         self.positions = remaining
+        self._save_positions()
+        # At 15:58 sweep Tradier for any positions still open (catches crash-restart gaps).
+        if (now.hour, now.minute) >= (15, 58) and not self._sweep_done:
+            self._tradier_force_exit_sweep(now)
+            self._sweep_done = True
 
     def _current_value(self, pos: Position) -> float:
         """Debit-to-close for spreads; current mid for long (earnings) positions."""
@@ -755,6 +804,144 @@ class HermesEngine:
             log.error('Sandbox order error: %s', exc)
             return False
 
+    def _fetch_tradier_positions_full(self) -> Dict[str, int]:
+        """Returns {symbol: quantity} for all open Tradier positions."""
+        if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
+            return {}
+        try:
+            r = requests.get(
+                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/positions',
+                headers=self._sb_hdrs,
+                timeout=10,
+            )
+            if not r.ok:
+                log.warning('Tradier positions fetch failed %d: %s', r.status_code, r.text[:100])
+                return {}
+            data = r.json()
+            positions = data.get('positions', {})
+            if not positions or positions == 'null':
+                return {}
+            pos_list = positions.get('position', [])
+            if isinstance(pos_list, dict):
+                pos_list = [pos_list]
+            return {p['symbol']: int(p.get('quantity', 0)) for p in pos_list}
+        except Exception as exc:
+            log.error('fetch_tradier_positions_full error: %s', exc)
+            return {}
+
+    def _fetch_tradier_positions(self) -> set:
+        """Returns set of option symbols currently open in Tradier sandbox."""
+        return set(self._fetch_tradier_positions_full().keys())
+
+    def _tradier_force_exit_sweep(self, now: datetime) -> None:
+        """Close all positions open in Tradier regardless of in-memory state."""
+        log.info('Tradier force-exit sweep at %s', now.strftime('%H:%M'))
+        open_pos = self._fetch_tradier_positions_full()
+        if not open_pos:
+            log.info('Force-exit sweep: no open Tradier positions found.')
+            return
+        for symbol, qty in open_pos.items():
+            if qty == 0:
+                continue
+            # positive qty = long (sell_to_close), negative qty = short (buy_to_close)
+            side    = 'sell_to_close' if qty > 0 else 'buy_to_close'
+            abs_qty = abs(qty)
+            log.info('Force-exit sweep: %s %s x%d reason=force_exit', side, symbol, abs_qty)
+            self._submit_order(symbol, side, abs_qty)
+        tg_send(
+            f'⚠️ Tradier force-exit sweep: closed {len(open_pos)} position(s) at {now.strftime("%H:%M")} ET.'
+        )
+
+    # ── Position persistence ──────────────────────────────────────────────────
+
+    def _pos_to_dict(self, pos: Position) -> dict:
+        return {
+            'strategy':     pos.strategy,
+            'underlying':   pos.underlying,
+            'spread_type':  pos.spread_type,
+            'legs': [
+                {
+                    'option_symbol': l.option_symbol,
+                    'side':          l.side,
+                    'fill_price':    l.fill_price,
+                    'delta':         l.delta,
+                    'theta':         l.theta,
+                }
+                for l in pos.legs
+            ],
+            'entry_time':    pos.entry_time.isoformat(),
+            'entry_credit':  pos.entry_credit,
+            'profit_thresh': pos.profit_thresh,
+            'stop_thresh':   pos.stop_thresh,
+            'force_exit':    list(pos.force_exit),
+            'contracts':     pos.contracts,
+            'entry_state':   pos.entry_state,
+            's4_exit_date':  pos.s4_exit_date.isoformat() if pos.s4_exit_date else None,
+        }
+
+    def _pos_from_dict(self, d: dict) -> Position:
+        return Position(
+            strategy      = d['strategy'],
+            underlying    = d['underlying'],
+            spread_type   = d['spread_type'],
+            legs          = [
+                Leg(
+                    option_symbol = l['option_symbol'],
+                    side          = l['side'],
+                    fill_price    = l['fill_price'],
+                    delta         = l.get('delta', 0.0),
+                    theta         = l.get('theta', 0.0),
+                )
+                for l in d['legs']
+            ],
+            entry_time    = datetime.fromisoformat(d['entry_time']),
+            entry_credit  = d['entry_credit'],
+            profit_thresh = d['profit_thresh'],
+            stop_thresh   = d['stop_thresh'],
+            force_exit    = tuple(d['force_exit']),
+            contracts     = d.get('contracts', 1),
+            entry_state   = d.get('entry_state', {}),
+            s4_exit_date  = date.fromisoformat(d['s4_exit_date']) if d.get('s4_exit_date') else None,
+        )
+
+    def _save_positions(self) -> None:
+        try:
+            POSITIONS_FILE.write_text(
+                json.dumps([self._pos_to_dict(p) for p in self.positions], indent=2, default=str)
+            )
+        except Exception as exc:
+            log.error('Failed to save positions: %s', exc)
+
+    def _load_positions(self) -> None:
+        if not POSITIONS_FILE.exists():
+            return
+        try:
+            saved = json.loads(POSITIONS_FILE.read_text())
+            if not saved:
+                return
+            if SANDBOX_KEY and SANDBOX_ACCOUNT:
+                tradier_syms = self._fetch_tradier_positions()
+                reconciled: List[Position] = []
+                for d in saved:
+                    pos      = self._pos_from_dict(d)
+                    leg_syms = {l.option_symbol for l in pos.legs}
+                    if leg_syms & tradier_syms:
+                        reconciled.append(pos)
+                        log.info('Reconciled: restored %s from positions.json + Tradier.', pos.strategy)
+                    else:
+                        log.info('Reconciled: %s not found in Tradier — dropped.', pos.strategy)
+                covered = {l.option_symbol for p in reconciled for l in p.legs}
+                unknown = tradier_syms - covered
+                if unknown:
+                    log.warning('Tradier has untracked open positions: %s — cannot auto-restore metadata.', unknown)
+                    tg_send(f'⚠️ Startup: untracked Tradier position(s) found: {", ".join(sorted(unknown))}')
+                self.positions = reconciled
+            else:
+                self.positions = [self._pos_from_dict(d) for d in saved]
+            log.info('Startup: loaded %d active position(s).', len(self.positions))
+        except Exception as exc:
+            log.error('Failed to load positions: %s', exc)
+
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _log_trade(self, trade: dict) -> None:
@@ -764,10 +951,11 @@ class HermesEngine:
         path.write_text(json.dumps(trades, indent=2, default=str))
 
     def _reset_daily(self) -> None:
-        self.today     = date.today()
-        self.daily_pnl = {}
-        self.total_pnl = 0.0
-        self.entered   = {}
+        self.today       = date.today()
+        self.daily_pnl   = {}
+        self.total_pnl   = 0.0
+        self.entered     = {}
+        self._sweep_done = False
         log.info('Daily reset: %s', self.today)
 
     def _strategy_loss_ok(self, name: str) -> bool:
