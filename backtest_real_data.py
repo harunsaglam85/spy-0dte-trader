@@ -180,11 +180,11 @@ class ThetaCache:
     def _get_client(self):
         if self._client is None:
             from thetadata import ThetaClient
-            username = self.env.get('THETADATA_USERNAME', '')
-            password = self.env.get('THETADATA_PASSWORD', '')
-            if not username or not password:
-                raise RuntimeError('THETADATA_USERNAME / THETADATA_PASSWORD missing from .env')
-            self._client = ThetaClient(email=username, password=password)
+            username = os.getenv('THETADATA_USERNAME')
+            passwd   = os.getenv('THETADATA_PASSWORD')
+            if not username or not passwd:
+                raise RuntimeError('THETADATA_USERNAME / THETADATA_PASSWORD missing from environment')
+            self._client = ThetaClient(username=username, passwd=passwd, launch=True)
             print('  ThetaData: connected.')
         return self._client
 
