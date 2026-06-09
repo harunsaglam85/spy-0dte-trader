@@ -318,6 +318,9 @@ class HermesEngine:
         }
         self._contango_today: Optional[bool] = None
         self._contango_date:  Optional[date] = None
+        # Options chain cache: (symbol, expiry) → (DataFrame, fetched_at monotonic)
+        self._chain_cache: Dict[Tuple[str, str], Tuple[pd.DataFrame, float]] = {}
+        self._chain_cache_ttl: float = 120.0  # 2 minutes
         self._load_positions()
 
     # ── Main loop (watchdog) ──────────────────────────────────────────────────
@@ -415,6 +418,19 @@ class HermesEngine:
         if vix < 20:  return 'normal'
         if vix < 25:  return 'elevated'
         return 'high_vol'
+
+    # ── Options chain cache ───────────────────────────────────────────────────
+
+    def _get_options_chain(self, symbol: str, expiry: str) -> pd.DataFrame:
+        """Return a cached options chain (greeks=false), refreshed every 2 minutes."""
+        key = (symbol, expiry)
+        cached_df, fetched_at = self._chain_cache.get(key, (pd.DataFrame(), 0.0))
+        if not cached_df.empty and (time.monotonic() - fetched_at) < self._chain_cache_ttl:
+            return cached_df
+        df = self.feeds.get_tradier_options_chain(symbol, expiry)
+        if not df.empty:
+            self._chain_cache[key] = (df, time.monotonic())
+        return df
 
     # ── VIX term structure filter ─────────────────────────────────────────────
 
@@ -519,7 +535,7 @@ class HermesEngine:
     # ── Spread entry ──────────────────────────────────────────────────────────
 
     def _enter_spread(self, cfg: StrategyConfig, ms: dict, now: datetime, expiry: str) -> None:
-        df = self.feeds.get_tradier_options_chain('SPY', expiry)
+        df = self._get_options_chain('SPY', expiry)
         if df.empty:
             log.warning('%s: empty options chain for %s.', cfg.name, expiry)
             return
@@ -591,10 +607,17 @@ class HermesEngine:
         puts = df[df['option_type'] == 'put'].copy()
         if puts.empty:
             return [], 0.0
-        puts = puts[puts['delta'].abs() > 0.01]
+        has_greeks = puts['delta'].abs().max() > 0.01
+        if has_greeks:
+            puts = puts[puts['delta'].abs() > 0.01]
+        else:
+            puts = puts[puts['bid'] > 0]
         if puts.empty:
             return [], 0.0
-        idx   = (puts['delta'].abs() - delta_target).abs().idxmin()
+        if has_greeks:
+            idx = (puts['delta'].abs() - delta_target).abs().idxmin()
+        else:
+            idx = puts['bid'].idxmax()
         short = puts.loc[idx]
         long_strike = round(float(short['strike']) - spread_width, 0)
         long_rows   = puts[puts['strike'] == long_strike]
@@ -614,10 +637,17 @@ class HermesEngine:
         calls = df[df['option_type'] == 'call'].copy()
         if calls.empty:
             return [], 0.0
-        calls = calls[calls['delta'].abs() > 0.01]
+        has_greeks = calls['delta'].abs().max() > 0.01
+        if has_greeks:
+            calls = calls[calls['delta'].abs() > 0.01]
+        else:
+            calls = calls[calls['bid'] > 0]
         if calls.empty:
             return [], 0.0
-        idx   = (calls['delta'].abs() - delta_target).abs().idxmin()
+        if has_greeks:
+            idx = (calls['delta'].abs() - delta_target).abs().idxmin()
+        else:
+            idx = calls['bid'].idxmax()
         short = calls.loc[idx]
         long_strike = round(float(short['strike']) + spread_width, 0)
         long_rows   = calls[calls['strike'] == long_strike]
@@ -671,7 +701,7 @@ class HermesEngine:
                 log.info('S4 %s: below MA50 (%.2f < %.2f) — skip.', ticker, px, ma50)
                 continue
             expiry = (next_earn + timedelta(days=2)).strftime('%Y-%m-%d')
-            df = self.feeds.get_tradier_options_chain(ticker, expiry)
+            df = self._get_options_chain(ticker, expiry)
             if df.empty:
                 log.warning('S4 %s: empty chain for %s.', ticker, expiry)
                 continue

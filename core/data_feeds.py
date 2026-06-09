@@ -211,7 +211,7 @@ class DataFeeds:
         """
         data = self._tradier_get(
             "/markets/options/chains",
-            params={"symbol": symbol, "expiration": expiration, "greeks": "true"},
+            params={"symbol": symbol, "expiration": expiration, "greeks": "false"},
         )
         try:
             options = data.get("options", {}).get("option", [])
