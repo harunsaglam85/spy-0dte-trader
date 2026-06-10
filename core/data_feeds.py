@@ -434,6 +434,23 @@ class DataFeeds:
         self._vix_cache = (vix, time.monotonic())
         return vix
 
+    def get_spy_vwap(self) -> float:
+        # FIX 5: compute VWAP from Alpaca 1-min bars
+        # Tradier quote.vwap returns 0.0 during market hours
+        try:
+            bars = self.get_intraday_bars(
+                symbol='SPY', timeframe='1Min', limit=400, days=1)
+            if bars.empty:
+                return 0.0
+            import datetime as _dtm
+            now_ny = _dtm.datetime.now(NY_TZ)
+            s = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
+            bars = bars[bars.index >= s]
+            return self._compute_vwap(bars) if not bars.empty else 0.0
+        except Exception as exc:
+            self.logger.error('get_spy_vwap error: %s', exc)
+            return 0.0
+
     def get_spy_price(self) -> float:
         """Return the latest SPY last-trade price via Tradier.
 
@@ -597,3 +614,44 @@ class DataFeeds:
         except (KeyError, ZeroDivisionError, TypeError) as exc:
             self.logger.error("_compute_vwap error: %s", exc)
             return 0.0
+
+    def get_vix_term_structure(self) -> float:
+        """Return VIX3M/VIX contango ratio via Tradier.
+
+        > 1.05 = contango (safe to trade, 84.2% WR historically)
+        < 1.05 = backwardation (pause all trading)
+
+        Falls back to 0.0 on any error (conservative — triggers backwardation filter).
+        """
+        cached_value, fetched_at = getattr(self, '_vts_cache', (None, 0.0))
+        if cached_value is not None and (time.monotonic() - fetched_at) < self._vix_cache_ttl:
+            return cached_value
+
+        ratio = None
+        try:
+            data = self._tradier_get("/markets/quotes", params={"symbols": "VIX,VIX3M"})
+            quotes = data["quotes"]["quote"]
+            if isinstance(quotes, list):
+                q = {item["symbol"]: float(item["last"]) for item in quotes}
+            else:
+                q = {quotes["symbol"]: float(quotes["last"])}
+
+            vix = q.get("VIX")
+            vix3m = q.get("VIX3M")
+
+            if vix and vix3m and vix > 0:
+                ratio = vix3m / vix
+            else:
+                self.logger.warning("get_vix_term_structure: missing VIX or VIX3M, got: %s", q)
+                ratio = 0.0
+
+        except Exception as exc:
+            self.logger.warning("get_vix_term_structure failed: %s. Defaulting to 0.0.", exc)
+            ratio = 0.0
+
+        if ratio is None or ratio < 0.5 or ratio > 2.0:
+            self.logger.warning("get_vix_term_structure: suspicious ratio %.4f — defaulting to 0.0.", ratio or -1)
+            ratio = 0.0
+
+        self._vts_cache = (ratio, time.monotonic())
+        return ratio

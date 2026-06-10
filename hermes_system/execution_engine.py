@@ -378,7 +378,7 @@ class HermesEngine:
     def _get_market_state(self, now: datetime) -> dict:
         spy_q     = self.feeds.get_tradier_quote('SPY')
         spy       = spy_q.get('last', 0.0)
-        vwap      = spy_q.get('vwap', 0.0)
+        vwap      = self.feeds.get_spy_vwap()  # FIX 5: computed from bars, not quote field
         vix       = self.feeds.get_vix()
         vix_prev  = self._get_vix_yesterday()
         ma50      = self._calc_ma50('SPY')
@@ -443,22 +443,18 @@ class HermesEngine:
     # ── VIX term structure filter ─────────────────────────────────────────────
 
     def _get_vix3m(self) -> float:
+        """Get VIX3M from Tradier (same source as get_vix). Falls back to 0.0 on error."""
         try:
-            info = yf.Ticker('^VIX3M').fast_info
-            price = float(info.get('last_price') or info.get('previousClose') or 0)
+            data = self.feeds._tradier_get("/markets/quotes", params={"symbols": "VIX3M"})
+            quote = data["quotes"]["quote"]
+            if isinstance(quote, list):
+                quote = quote[0]
+            price = float(quote["last"])
             if price > 0:
                 return price
         except Exception as exc:
-            log.warning('yfinance VIX3M failed: %s — trying CBOE fallback.', exc)
-        try:
-            resp = requests.get(VIX3M_CBOE_URL, timeout=15)
-            resp.raise_for_status()
-            df = pd.read_csv(io.StringIO(resp.text))
-            df.columns = df.columns.str.strip()
-            return float(df['CLOSE'].iloc[-1])
-        except Exception as exc:
-            log.error('CBOE VIX3M fallback also failed: %s', exc)
-            return 0.0
+            log.error("_get_vix3m Tradier failed: %s — returning 0.0", exc)
+        return 0.0
 
     def _check_term_structure(self) -> bool:
         """Returns True (contango — trade normally) or False (backwardation — skip all entries).
