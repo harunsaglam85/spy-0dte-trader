@@ -383,7 +383,7 @@ class HermesEngine:
         vix_prev  = self._get_vix_yesterday()
         ma50      = self._calc_ma50('SPY')
         if vwap == 0.0:
-            log.info('VWAP is 0.0 — treating spy_above_vwap as neutral (True).')
+            log.warning('VWAP is 0.0 — feed not ready, blocking VWAP-dependent entries.')
         return {
             'timestamp':      now,
             'spy':            spy,
@@ -392,7 +392,7 @@ class HermesEngine:
             'vix_falling':    bool(vix < vix_prev) if vix_prev else None,
             'vwap':           vwap,
             'ma50':           ma50,
-            'spy_above_vwap': bool(spy > vwap) if vwap else True,
+            'spy_above_vwap': bool(spy > vwap) if vwap else False,
             'spy_above_ma50': bool(spy > ma50) if ma50 else None,
             'vix_direction':  'neutral',
             'market_regime':  self._regime(vix),
