@@ -310,7 +310,8 @@ class HermesEngine:
         self.daily_pnl:  Dict[str, float] = {}
         self.total_pnl:  float = 0.0
         self.today:      date = date.today()
-        self.entered:    Dict[str, bool] = {}
+        self.entered:       Dict[str, bool] = {}
+        self.entered_today: set = set()
         self._sweep_done: bool = False
         self._sb_hdrs    = {
             'Authorization': f'Bearer {SANDBOX_KEY}',
@@ -381,6 +382,8 @@ class HermesEngine:
         vix       = self.feeds.get_vix()
         vix_prev  = self._get_vix_yesterday()
         ma50      = self._calc_ma50('SPY')
+        if vwap == 0.0:
+            log.info('VWAP is 0.0 — treating spy_above_vwap as neutral (True).')
         return {
             'timestamp':      now,
             'spy':            spy,
@@ -389,7 +392,7 @@ class HermesEngine:
             'vix_falling':    bool(vix < vix_prev) if vix_prev else None,
             'vwap':           vwap,
             'ma50':           ma50,
-            'spy_above_vwap': bool(spy > vwap) if vwap else None,
+            'spy_above_vwap': bool(spy > vwap) if vwap else True,
             'spy_above_ma50': bool(spy > ma50) if ma50 else None,
             'vix_direction':  'neutral',
             'market_regime':  self._regime(vix),
@@ -397,10 +400,15 @@ class HermesEngine:
 
     def _get_vix_yesterday(self) -> float:
         try:
-            df = self.feeds.get_ticker_daily('VIX', lookback=5)
-            if df.empty or len(df) < 2:
+            q = self.feeds.get_tradier_quote('VIX')
+            current = q.get('last', 0.0)
+            change_pct = q.get('change_percentage', 0.0)
+            if current <= 0:
                 return 0.0
-            return float(df['close'].iloc[-2])
+            denominator = 1.0 + change_pct / 100.0
+            if abs(denominator) < 0.001:
+                return 0.0
+            return round(current / denominator, 2)
         except Exception:
             return 0.0
 
@@ -497,7 +505,7 @@ class HermesEngine:
                     self._enter_earnings(cfg, ms, now)
                     self.entered['S4_checked'] = True
                 continue
-            if self.entered.get(name):
+            if name in self.entered_today:
                 continue
             if not self._strategy_loss_ok(name):
                 continue
@@ -556,6 +564,8 @@ class HermesEngine:
         theoretical  = credit
         slippage_pct = 0.02
         fill         = round(credit * (1.0 - slippage_pct), 2)
+
+        self.entered_today.add(cfg.name)
 
         for leg in legs:
             if not self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
@@ -1045,6 +1055,7 @@ class HermesEngine:
         self.daily_pnl       = {}
         self.total_pnl       = 0.0
         self.entered         = {}
+        self.entered_today   = set()
         self._sweep_done     = False
         self._contango_today = None
         self._contango_date  = None
