@@ -526,9 +526,24 @@ class HermesEngine:
         open_syms: Optional[set] = None
         for name, cfg in STRATEGIES.items():
             if cfg.spread_type == 'earnings':
-                if not self.entered.get('S4_checked'):
-                    self._enter_earnings(cfg, ms, now)
-                    self.entered['S4_checked'] = True
+                # C3: S4 is DISABLED — triply broken as coded (audit June 11):
+                #   1. Never evaluates: S4_checked was set on the first loop
+                #      iteration of the day (~9:30), but _enter_earnings requires
+                #      the 9:45-10:15 window — so it was checked once, failed the
+                #      window test, and was locked out for the day, every day.
+                #   2. Invalid OCC parsing: _submit_order derived the underlying
+                #      as option_symbol[:3], turning NVDA/TSLA/AAPL/... into
+                #      NVD/TSL/AAP — guaranteed broker rejections (see D8).
+                #   3. Can't hold overnight: S4 is a multi-day pre-earnings hold,
+                #      but the generic force_exit check closes it at 15:55 and the
+                #      15:58 sweep flattens everything at the broker — so even a
+                #      successful entry would never trade the backtested strategy.
+                # TODO: rebuild S4 — move the check inside the entry window,
+                # exempt multi-day positions from force_exit and the sweep, and
+                # fix the no-op debit cap (debit * 100 > 150) — then re-enable.
+                if not self.entered.get('S4_disabled_logged'):
+                    log.info('S4 disabled pending rebuild (audit C3) — earnings strategy will not trade.')
+                    self.entered['S4_disabled_logged'] = True
                 continue
             if name in self.entered_today:
                 continue
