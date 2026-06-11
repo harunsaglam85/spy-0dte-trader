@@ -812,7 +812,8 @@ class HermesEngine:
             val    = self._current_value(pos)
             reason = self._exit_reason(pos, val, now)
             if reason:
-                self._close_position(pos, reason, val, now)
+                if not self._close_position(pos, reason, val, now):
+                    remaining.append(pos)  # close not confirmed — keep tracking, retry next loop
             else:
                 remaining.append(pos)
         self.positions = remaining
@@ -860,10 +861,62 @@ class HermesEngine:
                 return 'stop_loss'
         return ''
 
-    def _close_position(self, pos: Position, reason: str, exit_val: float, now: datetime) -> None:
+    def _close_position(self, pos: Position, reason: str, exit_val: float, now: datetime) -> bool:
+        """Close all legs and book P&L. Returns False if any close order was
+        rejected or fill could not be verified — caller keeps the position and
+        retries on the next loop."""
+        # Snapshot broker quantities first: verification is by quantity delta,
+        # not symbol presence, so a shared strike held by another strategy
+        # doesn't fail verification and trigger a re-close of its leg.
+        pre_qty: Dict[str, int] = {}
+        if SANDBOX_KEY and SANDBOX_ACCOUNT:
+            pre_qty = self._fetch_tradier_positions_full()
+
+        rejected: List[Leg] = []
         for leg in pos.legs:
             close_side = 'buy_to_close' if leg.side == 'sell_to_open' else 'sell_to_close'
-            self._submit_order(leg.option_symbol, close_side, pos.contracts)
+            if self._submit_order(leg.option_symbol, close_side, pos.contracts):
+                continue
+            log.error('%s: close order rejected for %s %s — retrying once.',
+                      pos.strategy, close_side, leg.option_symbol)
+            time.sleep(2)
+            if not self._submit_order(leg.option_symbol, close_side, pos.contracts):
+                rejected.append(leg)
+
+        if rejected:
+            syms = [l.option_symbol for l in rejected]
+            log.critical('%s: CLOSE FAILED for %s (reason=%s) — position still open, will retry.',
+                         pos.strategy, syms, reason)
+            tg_send(
+                f'🚨 HERMES CLOSE FAILED: {pos.strategy} {", ".join(syms)} '
+                f'(reason={reason}) — leg(s) still open, retrying next loop.'
+            )
+            return False
+
+        # Verify the closes actually reduced broker quantities before booking P&L.
+        if SANDBOX_KEY and SANDBOX_ACCOUNT:
+            time.sleep(2)  # allow sandbox to settle fills
+            post_qty = self._fetch_tradier_positions_full()
+            unconfirmed = []
+            for leg in pos.legs:
+                pre  = pre_qty.get(leg.option_symbol, 0)
+                post = post_qty.get(leg.option_symbol, 0)
+                if pre == 0:
+                    # No pre-close snapshot for this symbol (fetch failure or
+                    # already flat) — fall back to absence check.
+                    ok = leg.option_symbol not in post_qty
+                else:
+                    ok = abs(pre) - abs(post) >= pos.contracts
+                if not ok:
+                    unconfirmed.append(leg.option_symbol)
+            if unconfirmed:
+                log.critical('%s: close fill verification failed — %s still open in Tradier, will retry.',
+                             pos.strategy, unconfirmed)
+                tg_send(
+                    f'🚨 HERMES CLOSE UNVERIFIED: {pos.strategy} {", ".join(unconfirmed)} '
+                    f'still open after close orders — retrying next loop.'
+                )
+                return False
 
         if pos.spread_type == 'earnings':
             debit = abs(pos.entry_credit)
@@ -907,6 +960,7 @@ class HermesEngine:
             f"{'🟩' if pnl >= 0 else '🟥'} HERMES EXIT: {pos.strategy} | {reason}\n"
             f"P&L: {'+' if pnl >= 0 else ''}${pnl:.2f} ({'+' if pnl_per_contract >= 0 else ''}${pnl_per_contract:.2f}/c) | Hold: {hold_min}m"
         )
+        return True
 
     # ── Tradier sandbox ───────────────────────────────────────────────────────
 
