@@ -678,7 +678,7 @@ class DataFeeds:
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             from io import StringIO
-            df_raw = pd.read_csv(StringIO(resp.text), header=0, names=[
+            df_raw = pd.read_csv(StringIO(resp.text), skiprows=1, header=None, names=[
                 'timestamp', 'symbol', 'expiration', 'strike', 'right',
                 'bid_size', 'bid_exchange', 'bid', 'bid_condition',
                 'ask_size', 'ask_exchange', 'ask', 'ask_condition'
