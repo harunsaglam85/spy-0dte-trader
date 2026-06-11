@@ -435,24 +435,28 @@ class DataFeeds:
         return vix
 
     def get_spy_vwap(self) -> float:
-        # FIX 5b: VWAP from Alpaca bars, falls back to spot price when feed stale
+        """Return today's intraday VWAP for SPY computed from Alpaca 1-min bars.
+
+        Returns 0.0 when bars are unavailable or stale (i.e. most recent bar is
+        not from today).  Callers that require a valid VWAP should treat 0.0 as
+        'feed not ready' and block VWAP-dependent logic until a real value is
+        available — the execution engine already does this.  We never substitute
+        the SPY spot price because spot != VWAP; a wrong proxy is worse than no
+        value.
+        """
         try:
             import datetime as _dtm
             now_ny = _dtm.datetime.now(NY_TZ)
             s_open = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
             bars = self.get_intraday_bars(
                 symbol='SPY', timeframe='1Min', limit=400, days=1)
-            if not bars.empty:
-                if bars.index[-1].date() == now_ny.date():
-                    today_bars = bars[bars.index >= s_open]
-                    if not today_bars.empty:
-                        return self._compute_vwap(today_bars)
-            # Stale feed fallback: use SPY spot as VWAP proxy
-            spy = self.get_spy_price()
-            if spy > 0:
-                self.logger.warning(
-                    'get_spy_vwap: feed stale, using SPY spot %.2f as VWAP proxy', spy)
-                return spy
+            if not bars.empty and bars.index[-1].date() == now_ny.date():
+                today_bars = bars[bars.index >= s_open]
+                if not today_bars.empty:
+                    return self._compute_vwap(today_bars)
+            self.logger.warning(
+                'get_spy_vwap: feed stale or no today bars — returning 0.0, '
+                'VWAP-dependent entries blocked until feed recovers.')
             return 0.0
         except Exception as exc:
             self.logger.error('get_spy_vwap error: %s', exc)
