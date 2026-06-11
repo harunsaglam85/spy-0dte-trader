@@ -440,6 +440,8 @@ class HermesEngine:
             log.warning('ThetaData chain empty, falling back to Tradier sandbox')
             df = self.feeds.get_tradier_options_chain(symbol, expiry)
         if not df.empty:
+            df['option_type'] = df['option_type'].str.lower()
+        if not df.empty:
             self._chain_cache[key] = (df, time.monotonic())
         return df
 
@@ -1040,6 +1042,33 @@ class HermesEngine:
             log.info('Startup: loaded %d active position(s).', len(self.positions))
         except Exception as exc:
             log.error('Failed to load positions: %s', exc)
+
+        # Rebuild entered_today from still-open positions so a crash/restart
+        # mid-day does not allow a second entry for the same strategy (T12 in
+        # particular has a 4-hour window and would otherwise re-fire every minute
+        # after a restart).
+        for p in self.positions:
+            if p.strategy == 'S4':
+                self.entered[f'S4_{p.underlying}'] = True
+            else:
+                self.entered_today.add(p.strategy)
+
+        # Also scan today's closed trade log so strategies that already exited
+        # earlier today are still blocked from re-entering.
+        trades_today = TRADES_DIR / f'{date.today().isoformat()}.json'
+        if trades_today.exists():
+            try:
+                for t in json.loads(trades_today.read_text()):
+                    strat = t.get('strategy', '')
+                    if strat == 'S4':
+                        ticker = t.get('entry_state', {}).get('ticker', '')
+                        if ticker:
+                            self.entered[f'S4_{ticker}'] = True
+                    elif strat:
+                        self.entered_today.add(strat)
+                log.info('Startup: restored entered_today=%s from today trade log.', self.entered_today)
+            except Exception as exc:
+                log.error('Failed to restore entered_today from today trade log: %s', exc)
 
     # ── Helpers ───────────────────────────────────────────────────────────────
 
