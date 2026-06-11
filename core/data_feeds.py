@@ -407,7 +407,9 @@ class DataFeeds:
     def get_vix(self) -> float:
         """Return the latest VIX spot price via Tradier.
 
-        Result is cached for 5 minutes.  Falls back to 20.0 on any error.
+        Result is cached for 5 minutes.  Returns 0.0 on any error — 0.0 fails
+        every strategy's vix_min check, so a feed outage blocks entries instead
+        of fabricating a tradeable value.  Failures are not cached.
         """
         cached_value, fetched_at = self._vix_cache
         if cached_value is not None and (time.monotonic() - fetched_at) < self._vix_cache_ttl:
@@ -421,15 +423,15 @@ class DataFeeds:
                 quote = quote[0]
             vix = float(quote["last"])
         except Exception as exc:
-            self.logger.warning("get_vix Tradier failed: %s. Using default 20.0", exc)
-            vix = 20.0
+            self.logger.warning("get_vix Tradier failed: %s. Returning 0.0 (blocks entries).", exc)
+            return 0.0
 
         # Sanity-check: VIX should be between 5 and 150 under normal conditions.
         if vix is None or vix < 5.0 or vix > 150.0:
             self.logger.warning(
-                "get_vix: suspicious value %.2f — using conservative default 20.0.", vix or -1
+                "get_vix: suspicious value %.2f — returning 0.0 (blocks entries).", vix or -1
             )
-            vix = 20.0
+            return 0.0
 
         self._vix_cache = (vix, time.monotonic())
         return vix
