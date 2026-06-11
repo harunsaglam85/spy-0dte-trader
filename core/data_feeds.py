@@ -685,7 +685,7 @@ class DataFeeds:
             df_raw['bid']    = pd.to_numeric(df_raw['bid'], errors='coerce').fillna(0.0)
             df_raw['ask']    = pd.to_numeric(df_raw['ask'], errors='coerce').fillna(0.0)
             df_raw['mid']    = (df_raw['bid'] + df_raw['ask']) / 2
-            df_raw['option_type'] = df_raw['right'].str.upper()
+            df_raw['option_type'] = df_raw['right'].str.upper().map({'C': 'call', 'P': 'put'}).fillna('')
             df_raw['delta']  = 0.0
             df_raw['gamma']  = 0.0
             df_raw['theta']  = 0.0
