@@ -570,14 +570,29 @@ class HermesEngine:
         slippage_pct = 0.02
         fill         = round(credit * (1.0 - slippage_pct), 2)
 
-        self.entered_today.add(cfg.name)
-        self._log_trade({'strategy': cfg.name, 'status': 'open', 'entry_time': str(__import__('datetime').datetime.now())})
-
+        submitted_legs: List[Leg] = []
         for leg in legs:
-            if not self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
-                log.error('%s: order failed for %s — aborting trade.', cfg.name, leg.option_symbol)
+            if self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
+                submitted_legs.append(leg)
+            else:
+                log.error('%s: order rejected for %s — rolling back %d submitted leg(s).',
+                          cfg.name, leg.option_symbol, len(submitted_legs))
+                self._rollback_legs(cfg.name, submitted_legs, cfg.contracts)
                 return
 
+        # Verify both legs actually filled in Tradier before recording the position.
+        if SANDBOX_KEY and SANDBOX_ACCOUNT:
+            time.sleep(2)  # allow sandbox to settle fills
+            open_syms = self._fetch_tradier_positions()
+            missing = [leg for leg in legs if leg.option_symbol not in open_syms]
+            if missing:
+                filled = [leg for leg in legs if leg.option_symbol in open_syms]
+                log.error('%s: fill verification failed — missing %s — rolling back %d filled leg(s).',
+                          cfg.name, [l.option_symbol for l in missing], len(filled))
+                self._rollback_legs(cfg.name, filled, cfg.contracts)
+                return
+
+        self.entered_today.add(cfg.name)
         profit_thresh = round(fill * (1.0 - cfg.profit_target_pct), 2)
         stop_thresh   = round(fill * cfg.stop_multiple, 2)
 
@@ -886,6 +901,22 @@ class HermesEngine:
         )
 
     # ── Tradier sandbox ───────────────────────────────────────────────────────
+
+    def _rollback_legs(self, strategy: str, filled_legs: List[Leg], contracts: int) -> None:
+        """Close any legs that filled when another leg in the same spread was rejected."""
+        for leg in filled_legs:
+            close_side = 'buy_to_close' if leg.side == 'sell_to_open' else 'sell_to_close'
+            log.warning('%s: ROLLBACK — submitting %s %s to close orphaned leg.',
+                        strategy, close_side, leg.option_symbol)
+            if not self._submit_order(leg.option_symbol, close_side, contracts):
+                log.error('%s: ROLLBACK FAILED for %s — MANUAL CLOSE REQUIRED.',
+                          strategy, leg.option_symbol)
+                tg_send(
+                    f'🚨 HERMES ROLLBACK FAILED: {strategy} {leg.option_symbol} '
+                    f'naked leg open — manual close required!'
+                )
+        if filled_legs:
+            tg_send(f'⚠️ HERMES {strategy}: leg rejection — {len(filled_legs)} leg(s) rolled back.')
 
     def _submit_order(self, option_symbol: str, side: str, qty: int) -> bool:
         if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
