@@ -567,6 +567,7 @@ class HermesEngine:
         fill         = round(credit * (1.0 - slippage_pct), 2)
 
         self.entered_today.add(cfg.name)
+        self._log_trade({'strategy': cfg.name, 'status': 'open', 'entry_time': str(__import__('datetime').datetime.now())})
 
         for leg in legs:
             if not self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
