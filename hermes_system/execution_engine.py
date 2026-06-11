@@ -353,8 +353,12 @@ class HermesEngine:
         # StartLimitIntervalSec/StartLimitBurst (5/hour) stop a crash loop, and
         # the OnFailure= unit pages Telegram when the unit finally enters the
         # failed state. No internal restart/crash-counter logic.
-        log.info('Hermes Engine starting — 22 strategies active (8 confirmed, 14 experimental).')
-        tg_send('🚀 Hermes Engine started — 22 strategies active (8 confirmed @ 3 contracts, 14 experimental @ 1 contract).')
+        # L1: count from the source of truth, not a hardcoded string. The
+        # knowledge base also lists R3C, T5, and T6, which exist there but are
+        # NOT implemented in STRATEGIES — reconcile before deploying them.
+        n = len(STRATEGIES)
+        log.info('Hermes Engine starting — %d strategies active.', n)
+        tg_send(f'🚀 Hermes Engine started — {n} strategies active.')
         try:
             self._run_loop()
         except Exception as exc:
