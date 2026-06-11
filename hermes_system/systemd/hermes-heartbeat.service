@@ -1,0 +1,8 @@
+[Unit]
+Description=Hermes engine heartbeat staleness check (audit U3)
+
+[Service]
+Type=oneshot
+WorkingDirectory=/root/spy-0dte-trader
+EnvironmentFile=/root/spy-0dte-trader/.env
+ExecStart=/usr/bin/python3 /root/spy-0dte-trader/hermes_system/check_heartbeat.py

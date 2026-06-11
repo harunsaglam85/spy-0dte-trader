@@ -37,6 +37,7 @@ HERMES_ROOT    = Path('/root/hermes_system')
 TRADES_DIR     = HERMES_ROOT / 'trades'
 LOG_DIR        = HERMES_ROOT / 'logs'
 POSITIONS_FILE = HERMES_ROOT / 'positions.json'
+HEARTBEAT_FILE = HERMES_ROOT / 'heartbeat.txt'
 for _d in (TRADES_DIR, LOG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -373,6 +374,7 @@ class HermesEngine:
             if not self._is_market_hours(now):
                 time.sleep(60)
                 continue
+            self._touch_heartbeat(now)
             # R1: one batched Tradier quote call per iteration covers SPY, VIX,
             # and every open leg — instead of one 18s-throttled call each, which
             # stretched the "60-second" risk loop to 2-5 minutes under load.
@@ -384,6 +386,16 @@ class HermesEngine:
             self._check_entries(ms, now)
             self._check_exits(ms, now, quotes)
             time.sleep(60)
+
+    def _touch_heartbeat(self, now: datetime) -> None:
+        """U3: external liveness signal, touched each in-hours loop iteration.
+        A hung process (stuck socket, not crashed) is invisible to systemd;
+        hermes-heartbeat.timer checks this file every 5 minutes and pages
+        Telegram if it goes stale during market hours."""
+        try:
+            HEARTBEAT_FILE.write_text(now.isoformat())
+        except Exception as exc:
+            log.warning('heartbeat write failed: %s', exc)
 
     # ── Market state ──────────────────────────────────────────────────────────
 
