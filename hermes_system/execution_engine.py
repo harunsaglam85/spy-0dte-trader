@@ -295,6 +295,27 @@ def _occ_symbol(underlying: str, expiry: str, option_type: str, strike: float) -
     return f"{underlying}{yy}{mm}{dd}{cp}{int(round(strike * 1000)):08d}"
 
 
+def parse_occ(option_symbol: str) -> Tuple[str, str, str, float]:
+    """Parse an OCC option symbol into (underlying, expiry_yymmdd, type, strike).
+
+    The OCC tail is always exactly 15 characters — YYMMDD + C/P + 8-digit
+    strike*1000 — so the underlying root is everything before it. This is the
+    only correct way to extract the root: a fixed slice like symbol[:3] turns
+    NVDA/TSLA/AAPL/GOOGL into NVD/TSL/AAP/GOO, which brokers reject (audit D8).
+
+    Example: parse_occ('NVDA260619C00140000') → ('NVDA', '260619', 'C', 140.0)
+
+    Raises ValueError if the symbol cannot contain a root plus the 15-char tail
+    (e.g. an equity symbol from an assigned position).
+    """
+    if len(option_symbol) < 16:
+        raise ValueError(f'not an OCC option symbol: {option_symbol!r}')
+    tail = option_symbol[-15:]
+    if tail[6] not in ('C', 'P') or not tail[:6].isdigit() or not tail[7:].isdigit():
+        raise ValueError(f'not an OCC option symbol: {option_symbol!r}')
+    return option_symbol[:-15], tail[:6], tail[6], int(tail[7:]) / 1000.0
+
+
 # ── Engine ─────────────────────────────────────────────────────────────────────
 
 class HermesEngine:
@@ -1009,7 +1030,11 @@ class HermesEngine:
         if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
             log.info('Sandbox creds not set — simulating %s %s.', side, option_symbol)
             return True
-        underlying = option_symbol[:3] if len(option_symbol) >= 3 else 'SPY'
+        try:
+            underlying = parse_occ(option_symbol)[0]
+        except ValueError:
+            log.error('Cannot parse OCC symbol %r — refusing to submit order.', option_symbol)
+            return False
         data = {
             'class':         'option',
             'symbol':        underlying,
@@ -1242,8 +1267,11 @@ class HermesEngine:
         try:
             today_str = date.today().strftime('%y%m%d')  # YYMMDD as in OCC symbol
             for sym in open_syms:
-                # OCC format: SPY260611P00725000 — date is chars 3-8
-                if len(sym) >= 15 and sym[3:9] == today_str:
+                try:
+                    expiry_yymmdd = parse_occ(sym)[1]
+                except ValueError:
+                    continue  # not an option (e.g. assigned shares)
+                if expiry_yymmdd == today_str:
                     # Check if this position belongs to this strategy via positions list
                     for pos in self.positions:
                         if pos.strategy == name:
