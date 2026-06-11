@@ -320,6 +320,9 @@ class HermesEngine:
         self._contango_today:      Optional[bool] = None
         self._contango_checked_at: float = 0.0
         self._contango_ttl:        float = 3600.0  # re-evaluate hourly
+        # R1: yesterday's VIX close cannot change intraday — cache it per day.
+        self._vix_yesterday:       float = 0.0
+        self._vix_yesterday_date:  Optional[date] = None
         # Options chain cache: (symbol, expiry) → (DataFrame, fetched_at monotonic)
         self._chain_cache: Dict[Tuple[str, str], Tuple[pd.DataFrame, float]] = {}
         self._chain_cache_ttl: float = 120.0  # 2 minutes
@@ -369,19 +372,28 @@ class HermesEngine:
             if not self._is_market_hours(now):
                 time.sleep(60)
                 continue
-            ms = self._get_market_state(now)
+            # R1: one batched Tradier quote call per iteration covers SPY, VIX,
+            # and every open leg — instead of one 18s-throttled call each, which
+            # stretched the "60-second" risk loop to 2-5 minutes under load.
+            symbols = ['SPY', 'VIX'] + [
+                leg.option_symbol for pos in self.positions for leg in pos.legs
+            ]
+            quotes = self.feeds.get_tradier_quotes(symbols)
+            ms = self._get_market_state(now, quotes)
             self._check_entries(ms, now)
-            self._check_exits(ms, now)
+            self._check_exits(ms, now, quotes)
             time.sleep(60)
 
     # ── Market state ──────────────────────────────────────────────────────────
 
-    def _get_market_state(self, now: datetime) -> dict:
-        spy_q     = self.feeds.get_tradier_quote('SPY')
-        spy       = spy_q.get('last', 0.0)
+    def _get_market_state(self, now: datetime, quotes: Dict[str, dict]) -> dict:
+        spy       = quotes.get('SPY', {}).get('last', 0.0)
         vwap      = self.feeds.get_spy_vwap()  # FIX 5: computed from bars, not quote field
-        vix       = self.feeds.get_vix()
-        vix_prev  = self._get_vix_yesterday()
+        vix_q     = quotes.get('VIX', {})
+        vix       = vix_q.get('last', 0.0)
+        if not (5.0 <= vix <= 150.0):
+            vix = 0.0  # fail closed — 0.0 fails every vix_min check (same as get_vix)
+        vix_prev  = self._get_vix_yesterday(vix_q)
         ma50      = self._calc_ma50('SPY')
         if vwap == 0.0:
             log.warning('VWAP is 0.0 — feed not ready, blocking VWAP-dependent entries.')
@@ -399,9 +411,14 @@ class HermesEngine:
             'market_regime':  self._regime(vix),
         }
 
-    def _get_vix_yesterday(self) -> float:
+    def _get_vix_yesterday(self, vix_quote: Optional[dict] = None) -> float:
+        """Yesterday's VIX close, derived from today's quote + change_percentage.
+        Cached for the day (R1) — it cannot change intraday, so it should never
+        cost a rate-limit slot after the first successful read."""
+        if self._vix_yesterday_date == datetime.now(ET).date() and self._vix_yesterday > 0:
+            return self._vix_yesterday
         try:
-            q = self.feeds.get_tradier_quote('VIX')
+            q = vix_quote if vix_quote else self.feeds.get_tradier_quote('VIX')
             current = q.get('last', 0.0)
             change_pct = q.get('change_percentage', 0.0)
             if current <= 0:
@@ -409,7 +426,10 @@ class HermesEngine:
             denominator = 1.0 + change_pct / 100.0
             if abs(denominator) < 0.001:
                 return 0.0
-            return round(current / denominator, 2)
+            value = round(current / denominator, 2)
+            self._vix_yesterday = value
+            self._vix_yesterday_date = datetime.now(ET).date()
+            return value
         except Exception:
             return 0.0
 
@@ -501,6 +521,9 @@ class HermesEngine:
             log.warning('Daily loss limit hit — skipping all entries.')
             return
         expiry = date.today().strftime('%Y-%m-%d')
+        # R1: snapshot broker positions at most once per loop and share it
+        # across strategies, instead of one fetch per entry-eligible strategy.
+        open_syms: Optional[set] = None
         for name, cfg in STRATEGIES.items():
             if cfg.spread_type == 'earnings':
                 if not self.entered.get('S4_checked'):
@@ -510,9 +533,12 @@ class HermesEngine:
             if name in self.entered_today:
                 continue
             # Hard guard: check live Tradier positions to survive restarts
-            if name not in ('S4',) and self._strategy_already_open(name):
-                self.entered_today.add(name)
-                continue
+            if name not in ('S4',):
+                if open_syms is None:
+                    open_syms = self._fetch_tradier_positions()
+                if self._strategy_already_open(name, open_syms):
+                    self.entered_today.add(name)
+                    continue
             if not self._strategy_loss_ok(name):
                 continue
             if not self._in_window(cfg, now):
@@ -807,10 +833,10 @@ class HermesEngine:
 
     # ── Exit gate ─────────────────────────────────────────────────────────────
 
-    def _check_exits(self, ms: dict, now: datetime) -> None:
+    def _check_exits(self, ms: dict, now: datetime, quotes: Dict[str, dict]) -> None:
         remaining = []
         for pos in self.positions:
-            val    = self._current_value(pos)
+            val    = self._current_value(pos, quotes)
             reason = self._exit_reason(pos, val, now)
             if reason:
                 if not self._close_position(pos, reason, val, now):
@@ -824,13 +850,16 @@ class HermesEngine:
             self._tradier_force_exit_sweep(now)
             self._sweep_done = True
 
-    def _current_value(self, pos: Position) -> float:
-        """Debit-to-close for spreads; current mid for long (earnings) positions."""
+    def _current_value(self, pos: Position, quotes: Dict[str, dict]) -> float:
+        """Debit-to-close for spreads; current mid for long (earnings) positions.
+        Leg quotes come from the per-loop batched fetch (R1) — no extra calls."""
         try:
             total = 0.0
             for leg in pos.legs:
-                q = self.feeds.get_tradier_quote(leg.option_symbol)
+                q = quotes.get(leg.option_symbol)
                 if not q:
+                    log.warning('%s: no quote for %s in batch — freezing value at entry credit.',
+                                pos.strategy, leg.option_symbol)
                     return abs(pos.entry_credit)
                 if leg.side == 'sell_to_open':
                     total += q.get('ask', 0.0)  # cost to buy back short
@@ -1212,10 +1241,10 @@ class HermesEngine:
         self._contango_checked_at = 0.0
         log.info('Daily reset: %s', self.today)
 
-    def _strategy_already_open(self, name: str) -> bool:
-        """Check live Tradier positions to see if this strategy already has open legs today."""
+    def _strategy_already_open(self, name: str, open_syms: set) -> bool:
+        """Check a shared snapshot of live Tradier positions (fetched once per
+        loop by the caller — R1) to see if this strategy already has open legs today."""
         try:
-            open_syms = self._fetch_tradier_positions()
             today_str = date.today().strftime('%y%m%d')  # YYMMDD as in OCC symbol
             for sym in open_syms:
                 # OCC format: SPY260611P00725000 — date is chars 3-8

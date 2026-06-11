@@ -199,6 +199,47 @@ class DataFeeds:
             self.logger.error("get_tradier_quote parse error for %s: %s", symbol, exc)
             return {}
 
+    def get_tradier_quotes(self, symbols: List[str]) -> Dict[str, dict]:
+        """Fetch quotes for multiple symbols in ONE rate-limited Tradier call.
+
+        Tradier's /markets/quotes accepts a comma-separated symbol list, so a
+        full risk-loop snapshot (SPY + VIX + every open option leg) costs a
+        single 18-second rate-limit slot instead of one per symbol.
+
+        Returns
+        -------
+        Dict keyed by symbol; each value has the same shape as
+        get_tradier_quote(). Symbols Tradier did not return are absent from
+        the dict. Returns {} on any error.
+        """
+        if not symbols:
+            return {}
+        data = self._tradier_get(
+            "/markets/quotes", params={"symbols": ",".join(symbols)}
+        )
+        try:
+            quotes = data["quotes"]["quote"]
+            if isinstance(quotes, dict):
+                quotes = [quotes]
+            out: Dict[str, dict] = {}
+            for q in quotes:
+                sym = q.get("symbol", "")
+                if not sym:
+                    continue
+                out[sym] = {
+                    "symbol": sym,
+                    "bid": float(q.get("bid") or 0.0),
+                    "ask": float(q.get("ask") or 0.0),
+                    "last": float(q.get("last") or 0.0),
+                    "volume": int(q.get("volume") or 0),
+                    "vwap": float(q.get("vwap") or 0.0),
+                    "change_percentage": float(q.get("change_percentage") or 0.0),
+                }
+            return out
+        except (KeyError, TypeError, ValueError) as exc:
+            self.logger.error("get_tradier_quotes parse error: %s", exc)
+            return {}
+
     def get_tradier_options_chain(self, symbol: str, expiration: str) -> pd.DataFrame:
         """Fetch the options chain for *symbol* at *expiration* (YYYY-MM-DD).
 
