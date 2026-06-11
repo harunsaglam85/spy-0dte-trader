@@ -1172,7 +1172,16 @@ class HermesEngine:
                             self.entered[f'S4_{ticker}'] = True
                     elif strat:
                         self.entered_today.add(strat)
+                    # Rebuild daily loss counters from closed trades so a
+                    # restart mid-day does not re-arm the daily stops from $0.
+                    pnl = t.get('pnl')
+                    if strat and pnl is not None:
+                        self.daily_pnl[strat] = self.daily_pnl.get(strat, 0.0) + float(pnl)
+                        self.total_pnl += float(pnl)
                 log.info('Startup: restored entered_today=%s from today trade log.', self.entered_today)
+                if self.daily_pnl:
+                    log.info('Startup: restored daily P&L from trade log: total=%.2f per-strategy=%s',
+                             self.total_pnl, self.daily_pnl)
             except Exception as exc:
                 log.error('Failed to restore entered_today from today trade log: %s', exc)
 
