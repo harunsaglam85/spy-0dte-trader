@@ -65,11 +65,6 @@ MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL s
 # Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
 MIN_CREDIT = 0.20
 
-# ── Watchdog limits (BUG 2) ───────────────────────────────────────────────────
-MAX_CRASHES_PER_HOUR = 5
-CRASH_WINDOW_MINUTES = 60
-RESTART_DELAY_SECS   = 30
-
 ET = pytz.timezone('America/New_York')
 
 CONTANGO_THRESHOLD = 1.05
@@ -328,41 +323,26 @@ class HermesEngine:
         self._chain_cache_ttl: float = 120.0  # 2 minutes
         self._load_positions()
 
-    # ── Main loop (watchdog) ──────────────────────────────────────────────────
+    # ── Main loop ─────────────────────────────────────────────────────────────
 
     def run(self) -> None:
+        # R3: systemd is the single supervisor. On a crash we log, alert, and
+        # re-raise so the process exits nonzero — Restart=always brings it back,
+        # StartLimitIntervalSec/StartLimitBurst (5/hour) stop a crash loop, and
+        # the OnFailure= unit pages Telegram when the unit finally enters the
+        # failed state. No internal restart/crash-counter logic.
         log.info('Hermes Engine starting — 22 strategies active (8 confirmed, 14 experimental).')
         tg_send('🚀 Hermes Engine started — 22 strategies active (8 confirmed @ 3 contracts, 14 experimental @ 1 contract).')
-        crash_times: List[datetime] = []
-        while True:
-            try:
-                self._run_loop()
-            except Exception as exc:
-                tb        = traceback.format_exc()
-                now_et    = datetime.now(ET)
-                crash_times.append(now_et)
-                cutoff    = now_et - timedelta(minutes=CRASH_WINDOW_MINUTES)
-                crash_times = [t for t in crash_times if t > cutoff]
-
-                crash_log = LOG_DIR / 'crash.log'
-                with crash_log.open('a') as f:
-                    f.write(f'\n[{now_et.isoformat()}] CRASH #{len(crash_times)}\n{tb}\n')
-
-                error_short = str(exc)[:200]
-
-                if len(crash_times) >= MAX_CRASHES_PER_HOUR:
-                    msg = (
-                        f'🚨 Engine unstable — manual intervention needed. '
-                        f'{len(crash_times)} crashes in {CRASH_WINDOW_MINUTES} minutes.'
-                    )
-                    log.critical('%s\n%s', msg, tb)
-                    tg_send(msg)
-                    return
-
-                msg = f'⚠️ Engine crashed — restarting in {RESTART_DELAY_SECS}s. Error: {error_short}'
-                log.error('%s\n%s', msg, tb)
-                tg_send(msg)
-                time.sleep(RESTART_DELAY_SECS)
+        try:
+            self._run_loop()
+        except Exception as exc:
+            tb     = traceback.format_exc()
+            now_et = datetime.now(ET)
+            with (LOG_DIR / 'crash.log').open('a') as f:
+                f.write(f'\n[{now_et.isoformat()}] CRASH\n{tb}\n')
+            log.critical('Engine crashed — exiting for systemd restart.\n%s', tb)
+            tg_send(f'⚠️ Engine crashed — systemd will restart. Error: {str(exc)[:200]}')
+            raise
 
     def _run_loop(self) -> None:
         while True:

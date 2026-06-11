@@ -1,0 +1,22 @@
+[Unit]
+Description=Hermes Trading Engine
+After=network.target thetadata.service
+Requires=thetadata.service
+# R3: systemd is the single supervisor. Up to 5 restarts per hour; if the
+# engine keeps crashing past that, the unit enters failed state and the
+# OnFailure= unit pages Telegram.
+StartLimitIntervalSec=3600
+StartLimitBurst=5
+OnFailure=hermes-engine-alert.service
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/spy-0dte-trader
+EnvironmentFile=/root/spy-0dte-trader/.env
+ExecStart=/usr/bin/python3 /root/spy-0dte-trader/hermes_system/execution_engine.py
+Restart=always
+RestartSec=30
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,7 @@
+[Unit]
+Description=Hermes engine failure alert (fired via OnFailure= when hermes-engine enters failed state)
+
+[Service]
+Type=oneshot
+EnvironmentFile=/root/spy-0dte-trader/.env
+ExecStart=/usr/bin/curl -sS -X POST "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/sendMessage" -d "chat_id=${TELEGRAM_CHAT_ID}" --data-urlencode "text=🚨 hermes-engine entered FAILED state (restart limit exhausted) — engine is DOWN, manual intervention required. Open positions may be unmanaged."
