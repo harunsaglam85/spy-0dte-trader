@@ -508,6 +508,10 @@ class HermesEngine:
                 continue
             if name in self.entered_today:
                 continue
+            # Hard guard: check live Tradier positions to survive restarts
+            if name not in ('S4',) and self._strategy_already_open(name):
+                self.entered_today.add(name)
+                continue
             if not self._strategy_loss_ok(name):
                 continue
             if not self._in_window(cfg, now):
@@ -1096,6 +1100,25 @@ class HermesEngine:
         self._contango_today = None
         self._contango_date  = None
         log.info('Daily reset: %s', self.today)
+
+    def _strategy_already_open(self, name: str) -> bool:
+        """Check live Tradier positions to see if this strategy already has open legs today."""
+        try:
+            open_syms = self._fetch_tradier_positions()
+            today_str = date.today().strftime('%y%m%d')  # YYMMDD as in OCC symbol
+            for sym in open_syms:
+                # OCC format: SPY260611P00725000 — date is chars 3-8
+                if len(sym) >= 15 and sym[3:9] == today_str:
+                    # Check if this position belongs to this strategy via positions list
+                    for pos in self.positions:
+                        if pos.strategy == name:
+                            leg_syms = {l.option_symbol for l in pos.legs}
+                            if sym in leg_syms:
+                                return True
+            return False
+        except Exception as exc:
+            log.warning('_strategy_already_open check failed: %s — allowing entry', exc)
+            return False
 
     def _strategy_loss_ok(self, name: str) -> bool:
         cfg   = STRATEGIES.get(name)
