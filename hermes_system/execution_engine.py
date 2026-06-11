@@ -628,7 +628,14 @@ class HermesEngine:
         if has_greeks:
             idx = (puts['delta'].abs() - delta_target).abs().idxmin()
         else:
-            idx = puts['bid'].idxmax()
+            # No greeks — use SPY spot to find OTM puts within 5-30 pts of ATM
+            spy_price = self.feeds.get_spy_price()
+            otm_puts = puts[(puts['strike'] >= spy_price - 30) & (puts['strike'] <= spy_price)]
+            if otm_puts.empty:
+                return [], 0.0
+            # Pick strike closest to delta_target * spy_price below spot
+            target_strike = spy_price * (1 - delta_target * 0.025)  # ~0.20 delta ≈ 0.5% OTM for SPY 0DTE
+            idx = (otm_puts['strike'] - target_strike).abs().idxmin()
         short = puts.loc[idx]
         long_strike = round(float(short['strike']) - spread_width, 0)
         long_rows   = puts[puts['strike'] == long_strike]
