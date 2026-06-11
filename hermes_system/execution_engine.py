@@ -1111,10 +1111,18 @@ class HermesEngine:
             s4_exit_date  = date.fromisoformat(d['s4_exit_date']) if d.get('s4_exit_date') else None,
         )
 
+    @staticmethod
+    def _atomic_write_json(path: Path, obj) -> None:
+        """Write JSON via tmp file + os.replace so a crash mid-write can never
+        leave a truncated file (which would crash-loop the engine on reload)."""
+        tmp = path.with_suffix(path.suffix + '.tmp')
+        tmp.write_text(json.dumps(obj, indent=2, default=str))
+        os.replace(tmp, path)
+
     def _save_positions(self) -> None:
         try:
-            POSITIONS_FILE.write_text(
-                json.dumps([self._pos_to_dict(p) for p in self.positions], indent=2, default=str)
+            self._atomic_write_json(
+                POSITIONS_FILE, [self._pos_to_dict(p) for p in self.positions]
             )
         except Exception as exc:
             log.error('Failed to save positions: %s', exc)
@@ -1191,7 +1199,7 @@ class HermesEngine:
         path   = TRADES_DIR / f'{date.today().isoformat()}.json'
         trades = json.loads(path.read_text()) if path.exists() else []
         trades.append(trade)
-        path.write_text(json.dumps(trades, indent=2, default=str))
+        self._atomic_write_json(path, trades)
 
     def _reset_daily(self) -> None:
         self.today           = date.today()
