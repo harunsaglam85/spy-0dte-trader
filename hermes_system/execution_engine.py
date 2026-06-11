@@ -317,8 +317,9 @@ class HermesEngine:
             'Authorization': f'Bearer {SANDBOX_KEY}',
             'Accept':        'application/json',
         }
-        self._contango_today: Optional[bool] = None
-        self._contango_date:  Optional[date] = None
+        self._contango_today:      Optional[bool] = None
+        self._contango_checked_at: float = 0.0
+        self._contango_ttl:        float = 3600.0  # re-evaluate hourly
         # Options chain cache: (symbol, expiry) → (DataFrame, fetched_at monotonic)
         self._chain_cache: Dict[Tuple[str, str], Tuple[pd.DataFrame, float]] = {}
         self._chain_cache_ttl: float = 120.0  # 2 minutes
@@ -462,25 +463,25 @@ class HermesEngine:
         return 0.0
 
     def _check_term_structure(self) -> bool:
-        """Returns True (contango — trade normally) or False (backwardation — skip all entries).
-        Result is cached for the current trading day."""
-        today = date.today()
-        if self._contango_date == today and self._contango_today is not None:
+        """Returns True (contango — trade normally) or False (backwardation or
+        missing data — skip all entries). Fails closed: incomplete data blocks
+        entries and is not cached, so the next loop retries. A valid reading is
+        cached for one hour so an intraday regime flip is picked up."""
+        if self._contango_today is not None and \
+                (time.monotonic() - self._contango_checked_at) < self._contango_ttl:
             return self._contango_today
 
         vix3m = self._get_vix3m()
         vix   = self.feeds.get_vix()
 
         if vix3m <= 0 or vix <= 0:
-            log.warning('Term structure check incomplete (VIX3M=%.2f VIX=%.2f) — defaulting to contango.', vix3m, vix)
-            self._contango_today = True
-            self._contango_date  = today
-            return True
+            log.warning('Term structure check incomplete (VIX3M=%.2f VIX=%.2f) — failing closed, blocking entries; will retry.', vix3m, vix)
+            return False
 
         ratio       = vix3m / vix
         is_contango = ratio >= CONTANGO_THRESHOLD
-        self._contango_today = is_contango
-        self._contango_date  = today
+        self._contango_today      = is_contango
+        self._contango_checked_at = time.monotonic()
 
         log.info('VIX term structure: VIX3M=%.2f VIX=%.2f ratio=%.4f regime=%s',
                  vix3m, vix, ratio, 'CONTANGO' if is_contango else 'BACKWARDATION')
@@ -1189,9 +1190,9 @@ class HermesEngine:
         self.total_pnl       = 0.0
         self.entered         = {}
         self.entered_today   = set()
-        self._sweep_done     = False
-        self._contango_today = None
-        self._contango_date  = None
+        self._sweep_done          = False
+        self._contango_today      = None
+        self._contango_checked_at = 0.0
         log.info('Daily reset: %s', self.today)
 
     def _strategy_already_open(self, name: str) -> bool:
