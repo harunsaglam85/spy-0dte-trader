@@ -435,33 +435,30 @@ class DataFeeds:
         return vix
 
     def get_spy_vwap(self) -> float:
-        """Return today's intraday VWAP for SPY computed from Alpaca 1-min bars.
-
-        Returns 0.0 when bars are unavailable or stale (i.e. most recent bar is
-        not from today).  Callers that require a valid VWAP should treat 0.0 as
-        'feed not ready' and block VWAP-dependent logic until a real value is
-        available — the execution engine already does this.  We never substitute
-        the SPY spot price because spot != VWAP; a wrong proxy is worse than no
-        value.
-        """
+        """Compute cumulative VWAP from Tradier timesales bars since market open."""
         try:
             import datetime as _dtm
             now_ny = _dtm.datetime.now(NY_TZ)
-            s_open = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
-            bars = self.get_intraday_bars(
-                symbol='SPY', timeframe='1Min', limit=400, days=1)
-            if not bars.empty and bars.index[-1].date() == now_ny.date():
-                today_bars = bars[bars.index >= s_open]
-                if not today_bars.empty:
-                    return self._compute_vwap(today_bars)
-            self.logger.warning(
-                'get_spy_vwap: feed stale or no today bars — returning 0.0, '
-                'VWAP-dependent entries blocked until feed recovers.')
-            return 0.0
+            start_str = now_ny.replace(hour=9, minute=30, second=0, microsecond=0).strftime('%Y-%m-%d %H:%M')
+            end_str   = now_ny.strftime('%Y-%m-%d %H:%M')
+            data  = self._tradier_get('/markets/timesales', params={
+                'symbol': 'SPY', 'interval': '5min',
+                'start': start_str, 'end': end_str, 'session_filter': 'open'
+            })
+            bars = data.get('series', {}).get('data', [])
+            if not bars:
+                self.logger.warning('get_spy_vwap: no timesales bars — returning 0.0')
+                return 0.0
+            total_pv = sum(float(b['vwap']) * float(b['volume']) for b in bars)
+            total_v  = sum(float(b['volume']) for b in bars)
+            if total_v == 0:
+                return 0.0
+            vwap = round(total_pv / total_v, 4)
+            self.logger.info('get_spy_vwap: %.4f (%d bars)', vwap, len(bars))
+            return vwap
         except Exception as exc:
-            self.logger.error('get_spy_vwap error: %s', exc)
+            self.logger.error('get_spy_vwap error: %s — returning 0.0', exc)
             return 0.0
-
     def get_spy_price(self) -> float:
         """Return the latest SPY last-trade price via Tradier.
 
