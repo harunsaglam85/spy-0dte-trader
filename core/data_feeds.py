@@ -435,18 +435,25 @@ class DataFeeds:
         return vix
 
     def get_spy_vwap(self) -> float:
-        # FIX 5: compute VWAP from Alpaca 1-min bars
-        # Tradier quote.vwap returns 0.0 during market hours
+        # FIX 5b: VWAP from Alpaca bars, falls back to spot price when feed stale
         try:
-            bars = self.get_intraday_bars(
-                symbol='SPY', timeframe='1Min', limit=400, days=1)
-            if bars.empty:
-                return 0.0
             import datetime as _dtm
             now_ny = _dtm.datetime.now(NY_TZ)
-            s = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
-            bars = bars[bars.index >= s]
-            return self._compute_vwap(bars) if not bars.empty else 0.0
+            s_open = now_ny.replace(hour=9, minute=30, second=0, microsecond=0)
+            bars = self.get_intraday_bars(
+                symbol='SPY', timeframe='1Min', limit=400, days=1)
+            if not bars.empty:
+                if bars.index[-1].date() == now_ny.date():
+                    today_bars = bars[bars.index >= s_open]
+                    if not today_bars.empty:
+                        return self._compute_vwap(today_bars)
+            # Stale feed fallback: use SPY spot as VWAP proxy
+            spy = self.get_spy_price()
+            if spy > 0:
+                self.logger.warning(
+                    'get_spy_vwap: feed stale, using SPY spot %.2f as VWAP proxy', spy)
+                return spy
+            return 0.0
         except Exception as exc:
             self.logger.error('get_spy_vwap error: %s', exc)
             return 0.0
@@ -655,3 +662,37 @@ class DataFeeds:
 
         self._vts_cache = (ratio, time.monotonic())
         return ratio
+
+    def get_thetadata_options_chain(self, symbol: str, expiration: str) -> pd.DataFrame:
+        """Fetch options chain from ThetaData v3 REST API.
+        expiration: YYYY-MM-DD format (converted to YYYYMMDD for ThetaData).
+        Returns DataFrame with same columns as get_tradier_options_chain.
+        """
+        try:
+            exp_td = expiration.replace('-', '')
+            url = f"http://localhost:25503/v3/option/snapshot/quote?symbol={symbol}&expiration={exp_td}"
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            from io import StringIO
+            df_raw = pd.read_csv(StringIO(resp.text), header=None, names=[
+                'timestamp', 'symbol', 'expiration', 'strike', 'right',
+                'bid_size', 'bid_exchange', 'bid', 'bid_condition',
+                'ask_size', 'ask_exchange', 'ask', 'ask_condition'
+            ])
+            if df_raw.empty:
+                return pd.DataFrame()
+            df_raw['strike'] = pd.to_numeric(df_raw['strike'], errors='coerce')
+            df_raw['bid']    = pd.to_numeric(df_raw['bid'], errors='coerce').fillna(0.0)
+            df_raw['ask']    = pd.to_numeric(df_raw['ask'], errors='coerce').fillna(0.0)
+            df_raw['mid']    = (df_raw['bid'] + df_raw['ask']) / 2
+            df_raw['option_type'] = df_raw['right'].str.upper()
+            df_raw['delta']  = 0.0
+            df_raw['gamma']  = 0.0
+            df_raw['theta']  = 0.0
+            df_raw['volume'] = 0
+            df_raw['open_interest'] = 0
+            return df_raw[['strike', 'option_type', 'bid', 'ask', 'mid',
+                           'delta', 'gamma', 'theta', 'volume', 'open_interest']]
+        except Exception as exc:
+            self.logger.warning("get_thetadata_options_chain failed: %s", exc)
+            return pd.DataFrame()

@@ -435,7 +435,10 @@ class HermesEngine:
         cached_df, fetched_at = self._chain_cache.get(key, (pd.DataFrame(), 0.0))
         if not cached_df.empty and (time.monotonic() - fetched_at) < self._chain_cache_ttl:
             return cached_df
-        df = self.feeds.get_tradier_options_chain(symbol, expiry)
+        df = self.feeds.get_thetadata_options_chain(symbol, expiry)
+        if df.empty:
+            log.warning('ThetaData chain empty, falling back to Tradier sandbox')
+            df = self.feeds.get_tradier_options_chain(symbol, expiry)
         if not df.empty:
             self._chain_cache[key] = (df, time.monotonic())
         return df
