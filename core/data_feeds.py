@@ -678,7 +678,7 @@ class DataFeeds:
             resp = requests.get(url, timeout=10)
             resp.raise_for_status()
             from io import StringIO
-            df_raw = pd.read_csv(StringIO(resp.text), header=None, names=[
+            df_raw = pd.read_csv(StringIO(resp.text), header=0, names=[
                 'timestamp', 'symbol', 'expiration', 'strike', 'right',
                 'bid_size', 'bid_exchange', 'bid', 'bid_condition',
                 'ask_size', 'ask_exchange', 'ask', 'ask_condition'
@@ -689,7 +689,7 @@ class DataFeeds:
             df_raw['bid']    = pd.to_numeric(df_raw['bid'], errors='coerce').fillna(0.0)
             df_raw['ask']    = pd.to_numeric(df_raw['ask'], errors='coerce').fillna(0.0)
             df_raw['mid']    = (df_raw['bid'] + df_raw['ask']) / 2
-            df_raw['option_type'] = df_raw['right'].str.upper().map({'C': 'call', 'P': 'put'}).fillna('')
+            df_raw['option_type'] = df_raw['right'].str.strip('"').str.upper().map({'CALL': 'call', 'PUT': 'put'}).fillna('')
             df_raw['delta']  = 0.0
             df_raw['gamma']  = 0.0
             df_raw['theta']  = 0.0
