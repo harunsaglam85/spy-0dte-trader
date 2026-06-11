@@ -593,6 +593,7 @@ class HermesEngine:
                 return
 
         self.entered_today.add(cfg.name)
+        self._log_trade({'strategy': cfg.name, 'status': 'open', 'entry_time': str(now)})
         profit_thresh = round(fill * (1.0 - cfg.profit_target_pct), 2)
         stop_thresh   = round(fill * cfg.stop_multiple, 2)
 
