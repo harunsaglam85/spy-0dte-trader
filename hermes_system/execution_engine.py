@@ -66,6 +66,14 @@ MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL s
 # Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
 MIN_CREDIT = 0.20
 
+# ── Order fill tracking (audit C5) ─────────────────────────────────────────────
+# Sandbox positions can lag accepted orders by 10-30s, so fills are verified by
+# polling each order's own status, never by waiting and snapshotting positions.
+ORDER_TERMINAL_STATUSES = frozenset({'filled', 'rejected', 'canceled', 'expired', 'error'})
+ORDER_FILL_TIMEOUT      = 30.0   # max seconds to wait for a market order to go terminal
+ORDER_POLL_INTERVAL     = 2.0    # seconds between order-status polls
+SIM_ORDER_ID            = 'SIM'  # sentinel order ID when running without sandbox creds
+
 ET = pytz.timezone('America/New_York')
 
 CONTANGO_THRESHOLD = 1.05
@@ -629,27 +637,68 @@ class HermesEngine:
         slippage_pct = 0.02
         fill         = round(credit * (1.0 - slippage_pct), 2)
 
-        submitted_legs: List[Leg] = []
+        submitted: List[Tuple[Leg, str]] = []
         for leg in legs:
-            if self._submit_order(leg.option_symbol, leg.side, cfg.contracts):
-                submitted_legs.append(leg)
+            order_id = self._submit_order(leg.option_symbol, leg.side, cfg.contracts)
+            if order_id:
+                submitted.append((leg, order_id))
             else:
                 log.error('%s: order rejected for %s — rolling back %d submitted leg(s).',
-                          cfg.name, leg.option_symbol, len(submitted_legs))
-                self._rollback_legs(cfg.name, submitted_legs, cfg.contracts)
+                          cfg.name, leg.option_symbol, len(submitted))
+                self._rollback_legs(cfg.name, [l for l, _ in submitted], cfg.contracts)
                 return
 
-        # Verify both legs actually filled in Tradier before recording the position.
+        # C5: verify fills by polling each leg's own order ID — never by waiting
+        # a fixed delay and snapshotting positions, which lag accepted orders by
+        # 10-30s on sandbox and made real fills look missing (abandoning live
+        # positions while believing nothing was open).
         if SANDBOX_KEY and SANDBOX_ACCOUNT:
-            time.sleep(2)  # allow sandbox to settle fills
-            open_syms = self._fetch_tradier_positions()
-            missing = [leg for leg in legs if leg.option_symbol not in open_syms]
-            if missing:
-                filled = [leg for leg in legs if leg.option_symbol in open_syms]
-                log.error('%s: fill verification failed — missing %s — rolling back %d filled leg(s).',
-                          cfg.name, [l.option_symbol for l in missing], len(filled))
-                self._rollback_legs(cfg.name, filled, cfg.contracts)
+            states = self._await_orders([oid for _, oid in submitted])
+            filled:    List[Tuple[Leg, dict]] = []
+            unfilled:  List[Tuple[Leg, str]]  = []
+            for leg, oid in submitted:
+                st = states.get(oid, {})
+                if st.get('status') == 'filled':
+                    filled.append((leg, st))
+                else:
+                    unfilled.append((leg, st.get('status') or 'unknown'))
+            if unfilled:
+                log.error('%s: fill verification failed — %s — rolling back %d filled leg(s).',
+                          cfg.name,
+                          [(l.option_symbol, status) for l, status in unfilled],
+                          len(filled))
+                self._rollback_legs(cfg.name, [l for l, _ in filled], cfg.contracts)
                 return
+            # C5: record the broker's actual per-leg fill prices and replace the
+            # modeled 2%-slippage credit with the real net credit when every leg
+            # reports one — recorded P&L should be broker truth, not model-on-model.
+            reported = 0
+            for leg, st in filled:
+                try:
+                    px = float(st.get('avg_fill_price') or 0.0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if px > 0:
+                    leg.fill_price = px
+                    reported += 1
+            if reported == len(legs):
+                actual_credit = round(sum(
+                    leg.fill_price if leg.side == 'sell_to_open' else -leg.fill_price
+                    for leg in legs), 2)
+                if actual_credit > 0:
+                    fill         = actual_credit
+                    slippage_pct = (1.0 - fill / theoretical) if theoretical > 0 else 0.0
+                    log.info('%s: actual fills recorded — net credit $%.2f (modeled $%.2f).',
+                             cfg.name, fill, round(theoretical * 0.98, 2))
+                else:
+                    log.critical('%s: actual net credit $%.2f is non-positive — keeping modeled '
+                                 'credit $%.2f for thresholds; INVESTIGATE FILLS.',
+                                 cfg.name, actual_credit, fill)
+                    tg_send(f'🚨 HERMES {cfg.name}: filled at non-positive net credit '
+                            f'${actual_credit:.2f} — check fills manually.')
+            else:
+                log.warning('%s: avg_fill_price missing for %d/%d legs — keeping modeled credit $%.2f.',
+                            cfg.name, len(legs) - reported, len(legs), fill)
 
         self.entered_today.add(cfg.name)
         self._log_trade({'strategy': cfg.name, 'status': 'open', 'entry_time': str(now)})
@@ -957,7 +1006,7 @@ class HermesEngine:
 
         # Verify the closes actually reduced broker quantities before booking P&L.
         if SANDBOX_KEY and SANDBOX_ACCOUNT:
-            time.sleep(2)  # allow sandbox to settle fills
+            time.sleep(8)  # allow sandbox to settle fills
             post_qty = self._fetch_tradier_positions_full()
             unconfirmed = []
             for leg in pos.legs:
@@ -1042,15 +1091,18 @@ class HermesEngine:
         if filled_legs:
             tg_send(f'⚠️ HERMES {strategy}: leg rejection — {len(filled_legs)} leg(s) rolled back.')
 
-    def _submit_order(self, option_symbol: str, side: str, qty: int) -> bool:
+    def _submit_order(self, option_symbol: str, side: str, qty: int) -> Optional[str]:
+        """Submit a market order. Returns the Tradier order ID on acceptance
+        (SIM_ORDER_ID when running without sandbox creds), None on rejection.
+        Acceptance is NOT a fill — callers must verify via _await_orders (C5)."""
         if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
             log.info('Sandbox creds not set — simulating %s %s.', side, option_symbol)
-            return True
+            return SIM_ORDER_ID
         try:
             underlying = parse_occ(option_symbol)[0]
         except ValueError:
             log.error('Cannot parse OCC symbol %r — refusing to submit order.', option_symbol)
-            return False
+            return None
         data = {
             'class':         'option',
             'symbol':        underlying,
@@ -1068,13 +1120,59 @@ class HermesEngine:
                 timeout=10,
             )
             if r.ok:
-                log.info('Sandbox order accepted: %s %s', side, option_symbol)
-                return True
+                order_id = (r.json().get('order') or {}).get('id')
+                if order_id is None:
+                    log.error('Sandbox order accepted but no order ID in response: %s', r.text[:200])
+                    return None
+                log.info('Sandbox order accepted: %s %s (order_id=%s)', side, option_symbol, order_id)
+                return str(order_id)
             log.error('Sandbox order failed %d: %s', r.status_code, r.text[:200])
-            return False
+            return None
         except Exception as exc:
             log.error('Sandbox order error: %s', exc)
-            return False
+            return None
+
+    def _get_order(self, order_id: str) -> dict:
+        """Fetch one order's current state from Tradier. Returns {} on any
+        error. Simulated orders report as immediately filled."""
+        if order_id == SIM_ORDER_ID:
+            return {'status': 'filled', 'avg_fill_price': 0.0}
+        try:
+            r = requests.get(
+                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/orders/{order_id}',
+                headers=self._sb_hdrs,
+                timeout=10,
+            )
+            if not r.ok:
+                log.warning('Order %s status fetch failed %d: %s', order_id, r.status_code, r.text[:100])
+                return {}
+            return r.json().get('order') or {}
+        except Exception as exc:
+            log.warning('Order %s status fetch error: %s', order_id, exc)
+            return {}
+
+    def _await_orders(self, order_ids: List[str]) -> Dict[str, dict]:
+        """C5: order-ID based fill tracking. Poll every order each
+        ORDER_POLL_INTERVAL seconds until all reach a terminal status or
+        ORDER_FILL_TIMEOUT elapses. Returns {order_id: last seen order dict};
+        an order still non-terminal at timeout keeps its last (possibly empty)
+        state and must be treated as unfilled by callers."""
+        deadline = time.monotonic() + ORDER_FILL_TIMEOUT
+        state: Dict[str, dict] = {oid: {} for oid in order_ids}
+        while True:
+            for oid in order_ids:
+                if state[oid].get('status') in ORDER_TERMINAL_STATUSES:
+                    continue
+                state[oid] = self._get_order(oid) or state[oid]
+            if all(s.get('status') in ORDER_TERMINAL_STATUSES for s in state.values()):
+                return state
+            if time.monotonic() >= deadline:
+                pending = [oid for oid, s in state.items()
+                           if s.get('status') not in ORDER_TERMINAL_STATUSES]
+                log.warning('Order polling timed out after %.0fs — still non-terminal: %s',
+                            ORDER_FILL_TIMEOUT, pending)
+                return state
+            time.sleep(ORDER_POLL_INTERVAL)
 
     def _fetch_tradier_positions_full(self) -> Dict[str, int]:
         """Returns {symbol: quantity} for all open Tradier positions."""
