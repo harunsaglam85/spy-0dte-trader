@@ -645,7 +645,7 @@ class HermesEngine:
             else:
                 log.error('%s: order rejected for %s — rolling back %d submitted leg(s).',
                           cfg.name, leg.option_symbol, len(submitted))
-                self._rollback_legs(cfg.name, [l for l, _ in submitted], cfg.contracts)
+                self._rollback_submitted(cfg.name, submitted, cfg.contracts)
                 return
 
         # C5: verify fills by polling each leg's own order ID — never by waiting
@@ -667,6 +667,14 @@ class HermesEngine:
                           cfg.name,
                           [(l.option_symbol, status) for l, status in unfilled],
                           len(filled))
+                # BUG2: cancel any order still working at timeout before walking
+                # away, then close every filled leg regardless of which side
+                # (sell or buy) was the one that failed.
+                for leg, oid in submitted:
+                    if states.get(oid, {}).get('status') not in ORDER_TERMINAL_STATUSES:
+                        if not self._cancel_order(oid):
+                            tg_send(f'🚨 HERMES {cfg.name}: order {oid} ({leg.option_symbol}) '
+                                    f'uncancelable during rollback — may fill unattended, check manually!')
                 self._rollback_legs(cfg.name, [l for l, _ in filled], cfg.contracts)
                 return
             # C5: record the broker's actual per-leg fill prices and replace the
@@ -1075,19 +1083,84 @@ class HermesEngine:
 
     # ── Tradier sandbox ───────────────────────────────────────────────────────
 
+    def _cancel_order(self, order_id: str) -> bool:
+        """Cancel a still-working order. Returns True if Tradier accepted the cancel."""
+        if order_id == SIM_ORDER_ID:
+            return True
+        try:
+            r = requests.delete(
+                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/orders/{order_id}',
+                headers=self._sb_hdrs,
+                timeout=10,
+            )
+            if r.ok:
+                log.info('Order %s cancel accepted.', order_id)
+                return True
+            log.warning('Order %s cancel failed %d: %s', order_id, r.status_code, r.text[:100])
+            return False
+        except Exception as exc:
+            log.warning('Order %s cancel error: %s', order_id, exc)
+            return False
+
+    def _rollback_submitted(self, strategy: str, submitted: List[Tuple[Leg, str]],
+                            contracts: int) -> None:
+        """BUG2: when any leg of a spread is rejected, flatten exactly the legs
+        that FILLED — whichever side they are. The old path closed previously
+        *accepted* legs without checking fills, so a sell_to_open rejection
+        after the buy leg filled left the long leg untouched (naked long
+        accumulation), and closing a merely-accepted-but-unfilled leg would
+        itself open a fresh unintended position. Polls each submitted order ID,
+        cancels anything still working, and closes only confirmed fills."""
+        if not submitted:
+            return
+        states = self._await_orders([oid for _, oid in submitted])
+        filled:  List[Leg] = []
+        for leg, oid in submitted:
+            status = states.get(oid, {}).get('status')
+            if status == 'filled':
+                filled.append(leg)
+            elif status not in ORDER_TERMINAL_STATUSES:
+                # Still working at timeout — cancel so it cannot fill after we
+                # walk away and recreate the naked-leg problem.
+                if not self._cancel_order(oid):
+                    log.error('%s: ROLLBACK — could not cancel working order %s (%s) — '
+                              'it may still fill. MANUAL CHECK REQUIRED.',
+                              strategy, oid, leg.option_symbol)
+                    tg_send(f'🚨 HERMES {strategy}: order {oid} ({leg.option_symbol}) '
+                            f'uncancelable during rollback — may fill unattended, check manually!')
+        self._rollback_legs(strategy, filled, contracts)
+
     def _rollback_legs(self, strategy: str, filled_legs: List[Leg], contracts: int) -> None:
-        """Close any legs that filled when another leg in the same spread was rejected."""
+        """Close any legs that filled when another leg in the same spread was
+        rejected. Each close uses the side matching the filled leg
+        (sell_to_open → buy_to_close, buy_to_open → sell_to_close) and is
+        verified by order-ID polling — an unverified rollback is a naked leg."""
+        closes: List[Tuple[Leg, str]] = []
         for leg in filled_legs:
             close_side = 'buy_to_close' if leg.side == 'sell_to_open' else 'sell_to_close'
             log.warning('%s: ROLLBACK — submitting %s %s to close orphaned leg.',
                         strategy, close_side, leg.option_symbol)
-            if not self._submit_order(leg.option_symbol, close_side, contracts):
+            order_id = self._submit_order(leg.option_symbol, close_side, contracts)
+            if order_id:
+                closes.append((leg, order_id))
+            else:
                 log.error('%s: ROLLBACK FAILED for %s — MANUAL CLOSE REQUIRED.',
                           strategy, leg.option_symbol)
                 tg_send(
                     f'🚨 HERMES ROLLBACK FAILED: {strategy} {leg.option_symbol} '
                     f'naked leg open — manual close required!'
                 )
+        if closes and SANDBOX_KEY and SANDBOX_ACCOUNT:
+            states = self._await_orders([oid for _, oid in closes])
+            for leg, oid in closes:
+                status = states.get(oid, {}).get('status')
+                if status != 'filled':
+                    log.error('%s: ROLLBACK close %s for %s did not fill (status=%s) — '
+                              'MANUAL CLOSE REQUIRED.', strategy, oid, leg.option_symbol, status)
+                    tg_send(
+                        f'🚨 HERMES ROLLBACK UNVERIFIED: {strategy} {leg.option_symbol} '
+                        f'close order {oid} status={status} — leg may still be open, check manually!'
+                    )
         if filled_legs:
             tg_send(f'⚠️ HERMES {strategy}: leg rejection — {len(filled_legs)} leg(s) rolled back.')
 
