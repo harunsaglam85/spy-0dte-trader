@@ -1000,22 +1000,19 @@ class HermesEngine:
         """Close all legs and book P&L. Returns False if any close order was
         rejected or fill could not be verified — caller keeps the position and
         retries on the next loop."""
-        # Snapshot broker quantities first: verification is by quantity delta,
-        # not symbol presence, so a shared strike held by another strategy
-        # doesn't fail verification and trigger a re-close of its leg.
-        pre_qty: Dict[str, int] = {}
-        if SANDBOX_KEY and SANDBOX_ACCOUNT:
-            pre_qty = self._fetch_tradier_positions_full()
-
-        rejected: List[Leg] = []
+        close_orders: List[Tuple[Leg, str]] = []
+        rejected:     List[Leg] = []
         for leg in pos.legs:
             close_side = 'buy_to_close' if leg.side == 'sell_to_open' else 'sell_to_close'
-            if self._submit_order(leg.option_symbol, close_side, pos.contracts):
-                continue
-            log.error('%s: close order rejected for %s %s — retrying once.',
-                      pos.strategy, close_side, leg.option_symbol)
-            time.sleep(2)
-            if not self._submit_order(leg.option_symbol, close_side, pos.contracts):
+            order_id = self._submit_order(leg.option_symbol, close_side, pos.contracts)
+            if not order_id:
+                log.error('%s: close order rejected for %s %s — retrying once.',
+                          pos.strategy, close_side, leg.option_symbol)
+                time.sleep(2)
+                order_id = self._submit_order(leg.option_symbol, close_side, pos.contracts)
+            if order_id:
+                close_orders.append((leg, order_id))
+            else:
                 rejected.append(leg)
 
         if rejected:
@@ -1028,30 +1025,50 @@ class HermesEngine:
             )
             return False
 
-        # Verify the closes actually reduced broker quantities before booking P&L.
+        # BUG4/C5: verify the closes by polling each close order's own ID until
+        # filled — not a fixed sleep + positions diff, which both raced the
+        # sandbox's 10-30s position lag and was ambiguous for strikes shared
+        # with another strategy.
         if SANDBOX_KEY and SANDBOX_ACCOUNT:
-            time.sleep(8)  # allow sandbox to settle fills
-            post_qty = self._fetch_tradier_positions_full()
-            unconfirmed = []
-            for leg in pos.legs:
-                pre  = pre_qty.get(leg.option_symbol, 0)
-                post = post_qty.get(leg.option_symbol, 0)
-                if pre == 0:
-                    # No pre-close snapshot for this symbol (fetch failure or
-                    # already flat) — fall back to absence check.
-                    ok = leg.option_symbol not in post_qty
-                else:
-                    ok = abs(pre) - abs(post) >= pos.contracts
-                if not ok:
-                    unconfirmed.append(leg.option_symbol)
+            states = self._await_orders([oid for _, oid in close_orders])
+            unconfirmed = [
+                (leg.option_symbol, states.get(oid, {}).get('status') or 'unknown')
+                for leg, oid in close_orders
+                if states.get(oid, {}).get('status') != 'filled'
+            ]
             if unconfirmed:
-                log.critical('%s: close fill verification failed — %s still open in Tradier, will retry.',
+                log.critical('%s: close fill verification failed — %s — will retry.',
                              pos.strategy, unconfirmed)
                 tg_send(
-                    f'🚨 HERMES CLOSE UNVERIFIED: {pos.strategy} {", ".join(unconfirmed)} '
-                    f'still open after close orders — retrying next loop.'
+                    f'🚨 HERMES CLOSE UNVERIFIED: {pos.strategy} '
+                    f'{", ".join(f"{s} ({st})" for s, st in unconfirmed)} '
+                    f'after close orders — retrying next loop.'
                 )
                 return False
+            # Book P&L off the broker's actual close fills when every leg
+            # reports one; otherwise keep the quote-derived estimate.
+            fills: Dict[str, float] = {}
+            for leg, oid in close_orders:
+                try:
+                    px = float(states.get(oid, {}).get('avg_fill_price') or 0.0)
+                except (TypeError, ValueError):
+                    px = 0.0
+                if px > 0:
+                    fills[leg.option_symbol] = px
+            if len(fills) == len(pos.legs):
+                if pos.spread_type == 'earnings':
+                    actual_exit = fills[pos.legs[0].option_symbol]
+                else:
+                    actual_exit = round(sum(
+                        fills[leg.option_symbol] if leg.side == 'sell_to_open'
+                        else -fills[leg.option_symbol]
+                        for leg in pos.legs), 2)
+                log.info('%s: actual close fills — exit value $%.2f (estimated $%.2f).',
+                         pos.strategy, actual_exit, exit_val)
+                exit_val = actual_exit
+            else:
+                log.warning('%s: avg_fill_price missing for %d/%d close legs — using quote-derived exit $%.2f.',
+                            pos.strategy, len(pos.legs) - len(fills), len(pos.legs), exit_val)
 
         if pos.spread_type == 'earnings':
             debit = abs(pos.entry_credit)
