@@ -390,14 +390,30 @@ class HermesEngine:
             # R1: one batched Tradier quote call per iteration covers SPY, VIX,
             # and every open leg — instead of one 18s-throttled call each, which
             # stretched the "60-second" risk loop to 2-5 minutes under load.
-            symbols = ['SPY', 'VIX'] + [
-                leg.option_symbol for pos in self.positions for leg in pos.legs
-            ]
-            quotes = self.feeds.get_tradier_quotes(symbols)
+            quotes = self.feeds.get_tradier_quotes(self._batch_quote_symbols())
             ms = self._get_market_state(now, quotes)
             self._check_entries(ms, now)
             self._check_exits(ms, now, quotes)
             time.sleep(60)
+
+    def _batch_quote_symbols(self) -> List[str]:
+        """BUG3: exit monitoring must quote exactly the leg symbols recorded at
+        entry — never strikes re-derived from spot, which drift as SPY moves
+        (R3D was monitored at 736 while the position's leg was 737, freezing
+        its exit logic at entry credit). Symbols come from the open positions'
+        legs, unioned with positions.json on disk so an engine whose in-memory
+        state has drifted from the persisted record still quotes every leg
+        actually open at the broker."""
+        syms = {leg.option_symbol for pos in self.positions for leg in pos.legs}
+        try:
+            if POSITIONS_FILE.exists():
+                for d in json.loads(POSITIONS_FILE.read_text() or '[]'):
+                    for l in d.get('legs', []):
+                        if l.get('option_symbol'):
+                            syms.add(l['option_symbol'])
+        except Exception as exc:
+            log.warning('Could not read %s for batch quote symbols: %s', POSITIONS_FILE, exc)
+        return ['SPY', 'VIX'] + sorted(syms)
 
     def _touch_heartbeat(self, now: datetime) -> None:
         """U3: external liveness signal, touched each in-hours loop iteration.
