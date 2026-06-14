@@ -492,15 +492,15 @@ class HermesEngine:
     # ── Options chain cache ───────────────────────────────────────────────────
 
     def _get_options_chain(self, symbol: str, expiry: str) -> pd.DataFrame:
-        """Return a cached options chain (greeks=false), refreshed every 2 minutes."""
+        """Return a cached options chain with real greeks, refreshed every 2 minutes."""
         key = (symbol, expiry)
         cached_df, fetched_at = self._chain_cache.get(key, (pd.DataFrame(), 0.0))
         if not cached_df.empty and (time.monotonic() - fetched_at) < self._chain_cache_ttl:
             return cached_df
-        df = self.feeds.get_thetadata_options_chain(symbol, expiry)
+        df = self.feeds.get_tradier_options_chain(symbol, expiry)
         if df.empty:
-            log.warning('ThetaData chain empty, falling back to Tradier sandbox')
-            df = self.feeds.get_tradier_options_chain(symbol, expiry)
+            log.warning('Tradier chain empty, falling back to ThetaData (no greeks — flag trades in validation dataset)')
+            df = self.feeds.get_thetadata_options_chain(symbol, expiry)
         if not df.empty:
             df['option_type'] = df['option_type'].str.lower()
         if not df.empty:
