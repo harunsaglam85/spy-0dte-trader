@@ -14,6 +14,14 @@ Type=simple
 User=root
 WorkingDirectory=/root/spy-0dte-trader
 EnvironmentFile=/root/spy-0dte-trader/.env
+# FIX 4: a stray `screen` session named 'hermes' running the engine alongside
+# this unit caused duplicate orders and doubled log lines (it launched the engine
+# with `... 2>&1 | tee -a execution.log`, so the StreamHandler output landed in the
+# same file as the FileHandler). Kill any such session before each start so systemd
+# is the sole supervisor. Leading '-' makes systemd ignore a non-zero exit when
+# none exists; quitting the screen session terminates the engine child it owns.
+ExecStartPre=-/usr/bin/screen -S hermes -X quit
+ExecStartPre=-/usr/bin/screen -wipe
 ExecStart=/usr/bin/python3 /root/spy-0dte-trader/hermes_system/execution_engine.py
 Restart=always
 RestartSec=30
