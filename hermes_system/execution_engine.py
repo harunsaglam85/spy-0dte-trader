@@ -1411,34 +1411,40 @@ class HermesEngine:
             log.error('Failed to save positions: %s', exc)
 
     def _load_positions(self) -> None:
-        if not POSITIONS_FILE.exists():
-            return
-        try:
-            saved = json.loads(POSITIONS_FILE.read_text())
-            if not saved:
-                return
-            if SANDBOX_KEY and SANDBOX_ACCOUNT:
-                tradier_syms = self._fetch_tradier_positions()
-                reconciled: List[Position] = []
-                for d in saved:
-                    pos      = self._pos_from_dict(d)
-                    leg_syms = {l.option_symbol for l in pos.legs}
-                    if leg_syms & tradier_syms:
-                        reconciled.append(pos)
-                        log.info('Reconciled: restored %s from positions.json + Tradier.', pos.strategy)
+        # FIX 2: loading tracked positions and rebuilding today's state from the
+        # trade log are INDEPENDENT. The early returns this method used to start
+        # with (`if not POSITIONS_FILE.exists(): return` and `if not saved: return`)
+        # skipped the trade-log scan below — so whenever positions.json was absent
+        # or empty (every position already closed/expired, or it was never written),
+        # entered_today and the daily P&L counters were NOT rebuilt, and a strategy
+        # that already fired today could re-enter after a restart. Load positions
+        # only when the file has content, but ALWAYS fall through to the rebuild.
+        if POSITIONS_FILE.exists():
+            try:
+                saved = json.loads(POSITIONS_FILE.read_text() or '[]')
+                if saved:
+                    if SANDBOX_KEY and SANDBOX_ACCOUNT:
+                        tradier_syms = self._fetch_tradier_positions()
+                        reconciled: List[Position] = []
+                        for d in saved:
+                            pos      = self._pos_from_dict(d)
+                            leg_syms = {l.option_symbol for l in pos.legs}
+                            if leg_syms & tradier_syms:
+                                reconciled.append(pos)
+                                log.info('Reconciled: restored %s from positions.json + Tradier.', pos.strategy)
+                            else:
+                                log.info('Reconciled: %s not found in Tradier — dropped.', pos.strategy)
+                        covered = {l.option_symbol for p in reconciled for l in p.legs}
+                        unknown = tradier_syms - covered
+                        if unknown:
+                            log.warning('Tradier has untracked open positions: %s — cannot auto-restore metadata.', unknown)
+                            tg_send(f'⚠️ Startup: untracked Tradier position(s) found: {", ".join(sorted(unknown))}')
+                        self.positions = reconciled
                     else:
-                        log.info('Reconciled: %s not found in Tradier — dropped.', pos.strategy)
-                covered = {l.option_symbol for p in reconciled for l in p.legs}
-                unknown = tradier_syms - covered
-                if unknown:
-                    log.warning('Tradier has untracked open positions: %s — cannot auto-restore metadata.', unknown)
-                    tg_send(f'⚠️ Startup: untracked Tradier position(s) found: {", ".join(sorted(unknown))}')
-                self.positions = reconciled
-            else:
-                self.positions = [self._pos_from_dict(d) for d in saved]
-            log.info('Startup: loaded %d active position(s).', len(self.positions))
-        except Exception as exc:
-            log.error('Failed to load positions: %s', exc)
+                        self.positions = [self._pos_from_dict(d) for d in saved]
+                    log.info('Startup: loaded %d active position(s).', len(self.positions))
+            except Exception as exc:
+                log.error('Failed to load positions: %s', exc)
 
         # Rebuild entered_today from still-open positions so a crash/restart
         # mid-day does not allow a second entry for the same strategy (T12 in
