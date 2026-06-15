@@ -74,6 +74,12 @@ ORDER_FILL_TIMEOUT      = 30.0   # max seconds to wait for a market order to go 
 ORDER_POLL_INTERVAL     = 2.0    # seconds between order-status polls
 SIM_ORDER_ID            = 'SIM'  # sentinel order ID when running without sandbox creds
 
+# ── Alert throttling (FIX 3) ───────────────────────────────────────────────────
+# Sandbox rejects a leg roughly every 90s, and _rollback_legs fired a Telegram
+# alert on every rollback — dozens of identical pings. Keep logging every rollback
+# to file, but only page Telegram once per this many seconds per strategy.
+ROLLBACK_ALERT_COOLDOWN = 600.0  # 10 minutes
+
 ET = pytz.timezone('America/New_York')
 
 CONTANGO_THRESHOLD = 1.05
@@ -338,6 +344,8 @@ class HermesEngine:
         self.entered:       Dict[str, bool] = {}
         self.entered_today: set = set()
         self._sweep_done: bool = False
+        # FIX 3: last time a rollback Telegram alert was sent, per strategy.
+        self.last_rollback_alert: Dict[str, float] = {}
         self._sb_hdrs    = {
             'Authorization': f'Bearer {SANDBOX_KEY}',
             'Accept':        'application/json',
@@ -1209,7 +1217,16 @@ class HermesEngine:
                         f'close order {oid} status={status} — leg may still be open, check manually!'
                     )
         if filled_legs:
-            tg_send(f'⚠️ HERMES {strategy}: leg rejection — {len(filled_legs)} leg(s) rolled back.')
+            # FIX 3: always record the rollback to the log file; rate-limit the
+            # Telegram alert to once per ROLLBACK_ALERT_COOLDOWN per strategy so a
+            # broker rejecting a leg every ~90s does not produce dozens of pings.
+            log.warning('%s: leg rejection — %d leg(s) rolled back.', strategy, len(filled_legs))
+            now_mono = time.monotonic()
+            if now_mono - self.last_rollback_alert.get(strategy, 0.0) > ROLLBACK_ALERT_COOLDOWN:
+                tg_send(f'⚠️ HERMES {strategy}: leg rejection — {len(filled_legs)} leg(s) rolled back.')
+                self.last_rollback_alert[strategy] = now_mono
+            else:
+                log.info('%s: rollback Telegram alert suppressed (cooldown active).', strategy)
 
     def _submit_order(self, option_symbol: str, side: str, qty: int) -> Optional[str]:
         """Submit a market order. Returns the Tradier order ID on acceptance
