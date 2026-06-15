@@ -725,7 +725,6 @@ class HermesEngine:
                             cfg.name, len(legs) - reported, len(legs), fill)
 
         self.entered_today.add(cfg.name)
-        self._log_trade({'strategy': cfg.name, 'status': 'open', 'entry_time': str(now)})
         profit_thresh = round(fill * (1.0 - cfg.profit_target_pct), 2)
         stop_thresh   = round(fill * cfg.stop_multiple, 2)
 
@@ -757,7 +756,22 @@ class HermesEngine:
         )
         self.positions.append(pos)
         self.entered[cfg.name] = True
+        # FIX 1: persist the tracked position to positions.json BEFORE writing the
+        # trade-log stub. By this point every leg is confirmed filled at the broker,
+        # so positions.json must become the first durable record of the live spread.
+        # If the engine restarts in the gap, _load_positions reconciles the saved
+        # leg symbols against Tradier and restores the position with full metadata
+        # (exit thresholds, entry_state), and entered_today is rebuilt from it.
+        # The stub is written second and now carries the leg symbols, so the
+        # trade-log rebuild path can also match the legs and block re-entry even if
+        # positions.json reconciliation drops the position (e.g. already expired).
         self._save_positions()
+        self._log_trade({
+            'strategy':   cfg.name,
+            'status':     'open',
+            'entry_time': str(now),
+            'legs':       [l.option_symbol for l in legs],
+        })
         log.info('Entered %s: %dc credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, cfg.contracts, fill, profit_thresh, stop_thresh)
         tg_send(
             f"🟢 HERMES ENTRY: {cfg.name} {cfg.spread_type.upper()} ({cfg.contracts}c)\n"
