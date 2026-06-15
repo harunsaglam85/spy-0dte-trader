@@ -68,6 +68,14 @@ class DataFeeds:
         self._last_tradier_call: float = 0.0
         self._tradier_min_interval: float = 18.0  # 200 calls/hour → 1 per 18 s
 
+        # FIX 5: per-endpoint HTTP read timeouts. /markets/timesales repeatedly
+        # timed out at the shared 10s budget; give it (and any other slow
+        # endpoint) a longer one without lengthening every call.
+        self._tradier_default_timeout: float = 10.0
+        self._tradier_endpoint_timeouts: Dict[str, float] = {
+            "/markets/timesales": 20.0,
+        }
+
         # VIX cache: (value, fetched_at_timestamp)
         self._vix_cache: tuple = (None, 0.0)
         self._vix_cache_ttl: float = 300.0  # 5 minutes
@@ -87,6 +95,7 @@ class DataFeeds:
         """
         url = f"{TRADIER_BASE}{endpoint}"
         delay = 1.0
+        timeout = self._tradier_endpoint_timeouts.get(endpoint, self._tradier_default_timeout)
 
         with self._tradier_lock:
             now = time.monotonic()
@@ -105,7 +114,7 @@ class DataFeeds:
                     url,
                     headers=self._tradier_headers,
                     params=params or {},
-                    timeout=10,
+                    timeout=timeout,
                 )
                 resp.raise_for_status()
                 return resp.json()
