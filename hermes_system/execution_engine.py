@@ -622,8 +622,8 @@ class HermesEngine:
 
     def _extra_ok(self, cfg: StrategyConfig, ms: dict) -> bool:
         x = cfg.extra
-        if x.get('skip_fomc_weeks') and ms['timestamp'].date() in FOMC_DATES:
-            log.debug('%s: FOMC week — skip.', cfg.name)
+        if x.get('skip_fomc_weeks') and self._is_fomc_week(ms['timestamp'].date()):
+            log.info('%s: FOMC week — skip.', cfg.name)
             return False
         if x.get('require_spy_above_vwap') and not ms.get('spy_above_vwap'):
             return False
@@ -1554,6 +1554,17 @@ class HermesEngine:
     def _days_to_fomc(self, today: date) -> int:
         future = sorted(d for d in FOMC_DATES if d >= today)
         return (future[0] - today).days if future else 999
+
+    def _is_fomc_week(self, d: date) -> bool:
+        """FIX 6: skip_fomc_weeks must skip the ENTIRE Mon–Fri week that contains
+        an FOMC meeting, matching R3D's backtest. The old check only matched exact
+        meeting dates in FOMC_DATES, so on a week whose meeting falls Tue–Wed (e.g.
+        June 16–17, 2026) R3D's Friday entry (June 19) leaked through. FOMC_DATES
+        already lists June 15/16/17, 2026; this widens the gate to the whole week.
+        Returns True if any weekday of d's week is an FOMC meeting day."""
+        monday = d - timedelta(days=d.weekday())
+        week   = {monday + timedelta(days=i) for i in range(5)}  # Mon–Fri
+        return bool(week & FOMC_DATES)
 
 
 if __name__ == '__main__':
