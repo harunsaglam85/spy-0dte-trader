@@ -42,6 +42,16 @@ for _d in (TRADES_DIR, LOG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
 # ── Logging ────────────────────────────────────────────────────────────────────
+# FIX 7: doubled lines in execution.log were NOT a duplicate handler in this
+# module — basicConfig registers exactly one FileHandler (→execution.log) and one
+# StreamHandler (→stdout). The duplication came from a second engine launched in a
+# `screen` session that piped stdout through `tee -a execution.log` (see FIX 4):
+# every record was written once by the FileHandler and again by tee'ing the
+# StreamHandler into the same file (hence identical millisecond timestamps).
+# systemd is now the sole supervisor and sends stdout to the journal
+# (StandardOutput=journal), so the FileHandler is the single writer to the file.
+# force=True drops any pre-existing root handlers before installing ours, so a
+# re-import or re-exec can never stack a second FileHandler on the same file.
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(name)s %(levelname)s %(message)s',
@@ -49,6 +59,7 @@ logging.basicConfig(
         logging.FileHandler(LOG_DIR / 'execution.log'),
         logging.StreamHandler(),
     ],
+    force=True,
 )
 log = logging.getLogger('hermes.execution')
 
