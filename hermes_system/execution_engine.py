@@ -77,6 +77,15 @@ MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL s
 # Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
 MIN_CREDIT = 0.20
 
+# ── Global VIX floor (FIX 2) ───────────────────────────────────────────────────
+# 442-day backtest: VIX < 17 produced no tradable credit ($0.20+) on 90.7% of
+# days, and configured minimums of 15/17 let strategies fire into those
+# low-volatility regimes where credits sit below $0.20. Rather than edit each
+# strategy's vix_min in the STRATEGIES dict (configs are not modified), enforce a
+# single hard floor at entry time: the effective minimum is max(cfg.vix_min, 18).
+# Strategies already at 20+ are unaffected.
+GLOBAL_VIX_FLOOR = 18.0
+
 # ── Order fill tracking (audit C5) ─────────────────────────────────────────────
 # Sandbox positions can lag accepted orders by 10-30s, so fills are verified by
 # polling each order's own status, never by waiting and snapshotting positions.
@@ -633,7 +642,10 @@ class HermesEngine:
                 continue
             if not self._in_window(cfg, now):
                 continue
-            if not (cfg.vix_min <= ms['vix'] < cfg.vix_max):
+            # FIX 2: hard global VIX floor of 18 layered over each strategy's own
+            # vix_min, without touching the STRATEGIES dict.
+            eff_vix_min = max(cfg.vix_min, GLOBAL_VIX_FLOOR)
+            if not (eff_vix_min <= ms['vix'] < cfg.vix_max):
                 continue
             if not self._extra_ok(cfg, ms):
                 continue
