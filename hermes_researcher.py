@@ -42,6 +42,11 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 
+try:
+    import yfinance as yf
+except Exception:  # pragma: no cover - yfinance optional at import time
+    yf = None
+
 # ── project paths (Hetzner production) ───────────────────────────────────────
 PROJECT_ROOT  = Path("/root/spy-0dte-trader")
 HERMES_ROOT   = Path("/root/hermes_system")
@@ -49,6 +54,7 @@ NEW_STRAT_DIR = HERMES_ROOT / "new_strategies"
 PENDING_DIR   = HERMES_ROOT / "pending_strategies"
 PENDING_FILE  = HERMES_ROOT / "pending_approvals.json"
 REJECTIONS_FILE = HERMES_ROOT / "rejections.json"
+TRADES_DIR    = HERMES_ROOT / "trades"   # execution engine writes YYYY-MM-DD.json here
 DATA_DIR      = Path("/root/backtest_data")
 
 for _d in (HERMES_ROOT, NEW_STRAT_DIR, PENDING_DIR, DATA_DIR):
@@ -88,6 +94,9 @@ _load_env()
 BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 DB_PATH   = str(PROJECT_ROOT / "trading.db")
+
+# --dry-run: print the report instead of sending Telegram, skip approval polling
+DRY_RUN   = "--dry-run" in sys.argv
 
 # ── kill criteria ─────────────────────────────────────────────────────────────
 KILL_OOS_WR_MIN        = 0.55   # OOS win-rate floor
@@ -175,6 +184,11 @@ class BacktestResult:
 
 def _tg_send(text: str) -> Optional[int]:
     """Send a Telegram message; return message_id or None on failure."""
+    if DRY_RUN:
+        print("\n--- [DRY-RUN] Telegram message ---")
+        print(text)
+        print("--- end message ---\n")
+        return None
     if not BOT_TOKEN or not CHAT_ID:
         logger.warning("Telegram not configured — skipping send.")
         return None
@@ -241,6 +255,78 @@ def _poll_for_reply(
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# Market news sentiment (yfinance) — gives Hermes real market context
+# ══════════════════════════════════════════════════════════════════════════════
+
+def get_market_news(limit: int = 10) -> List[Dict]:
+    """Fetch recent SPY-related headlines from Yahoo Finance."""
+    if yf is None:
+        return []
+    try:
+        spy = yf.Ticker("SPY")
+        news = spy.news[:limit]
+        results = []
+        for n in news:
+            content = n.get("content", {})
+            results.append({
+                "title": content.get("title", ""),
+                "summary": content.get("summary", ""),
+                "provider": content.get("provider", {}).get("displayName", ""),
+            })
+        return results
+    except Exception as e:
+        logger.warning("get_market_news failed: %s", e)
+        return []
+
+
+def get_vix_news(limit: int = 5) -> List[Dict]:
+    """Fetch recent VIX-related headlines from Yahoo Finance."""
+    if yf is None:
+        return []
+    try:
+        vix = yf.Ticker("^VIX")
+        news = vix.news[:limit]
+        results = []
+        for n in news:
+            content = n.get("content", {})
+            results.append({"title": content.get("title", "")})
+        return results
+    except Exception:
+        return []
+
+
+def _format_news_section() -> str:
+    """
+    Build the 'MARKET NEWS THIS WEEK' section for the weekly research prompt/report.
+    Placed before the trade analysis so Hermes has real market context.
+    """
+    spy_news = get_market_news(limit=10)
+    vix_news = get_vix_news(limit=5)
+
+    lines = ["<b>MARKET NEWS THIS WEEK</b>"]
+
+    if spy_news:
+        lines.append("<i>SPY / broad market:</i>")
+        for item in spy_news:
+            title = item.get("title", "").strip()
+            if not title:
+                continue
+            provider = item.get("provider", "").strip()
+            lines.append(f"  • {title}" + (f" ({provider})" if provider else ""))
+    else:
+        lines.append("  • (no SPY headlines available)")
+
+    if vix_news:
+        lines.append("<i>Volatility / VIX:</i>")
+        for item in vix_news:
+            title = item.get("title", "").strip()
+            if title:
+                lines.append(f"  • {title}")
+
+    return "\n".join(lines)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # Database helpers (thin wrapper — avoids importing core/database.py directly
 # because this script may run before the venv is fully activated on Hetzner)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -253,20 +339,56 @@ def _db_connect():
     return conn
 
 
+def _load_trade_records(
+    since_iso: Optional[str] = None,
+    strategy: Optional[str] = None,
+) -> List[Dict]:
+    """
+    Read trade records from /root/hermes_system/trades/YYYY-MM-DD.json files
+    (the source of truth written by the execution engine — there is no SQLite
+    'trades' table). Records are normalised so downstream analysis can rely on
+    'pnl', 'vix', 'timestamp', and 'strategy' keys regardless of engine schema.
+
+    since_iso : keep only files dated on/after this YYYY-MM-DD (inclusive).
+    strategy  : keep only records for this strategy.
+    """
+    if not TRADES_DIR.exists():
+        return []
+
+    records: List[Dict] = []
+    for path in sorted(TRADES_DIR.glob("*.json"), reverse=True):
+        file_date = path.stem  # YYYY-MM-DD
+        if since_iso and file_date < since_iso:
+            continue
+        try:
+            raw = json.loads(path.read_text())
+        except Exception as exc:
+            logger.warning("Skipping unreadable trade file %s: %s", path.name, exc)
+            continue
+        if not isinstance(raw, list):
+            continue
+        for rec in raw:
+            if not isinstance(rec, dict):
+                continue
+            if strategy and rec.get("strategy") != strategy:
+                continue
+            norm = dict(rec)
+            norm.setdefault("pnl", rec.get("pnl", 0.0) or 0.0)
+            norm["vix"] = rec.get("vix_entry", rec.get("vix"))
+            norm["timestamp"] = rec.get("entry_time", rec.get("timestamp", "")) or ""
+            norm.setdefault("strategy", rec.get("strategy", ""))
+            records.append(norm)
+
+    records.sort(key=lambda r: r.get("timestamp", ""), reverse=True)
+    return records
+
+
 def _get_trades_since(conn, since_iso: str) -> List[Dict]:
-    cur = conn.execute(
-        "SELECT * FROM trades WHERE date(timestamp) >= ? ORDER BY timestamp DESC",
-        (since_iso,),
-    )
-    return [dict(r) for r in cur.fetchall()]
+    return _load_trade_records(since_iso=since_iso)
 
 
 def _get_all_trades(conn, strategy: str) -> List[Dict]:
-    cur = conn.execute(
-        "SELECT * FROM trades WHERE strategy = ? ORDER BY timestamp DESC",
-        (strategy,),
-    )
-    return [dict(r) for r in cur.fetchall()]
+    return _load_trade_records(strategy=strategy)
 
 
 def _log_rejection(name: str, reason: str) -> None:
@@ -1176,17 +1298,26 @@ def run() -> None:
     conn = _db_connect()
 
     # ── 0b. Handle any pending approvals from last run ────────────────────────
-    last_update_id = _tg_get_last_update_id()
-    last_update_id = _check_pending_approvals(last_update_id)
+    if DRY_RUN:
+        logger.info("DRY-RUN: skipping pending-approval polling.")
+        last_update_id = 0
+    else:
+        last_update_id = _tg_get_last_update_id()
+        last_update_id = _check_pending_approvals(last_update_id)
 
     # ── 1. Read past week's trades ────────────────────────────────────────────
     week_ago = (date.today() - timedelta(days=7)).isoformat()
     weekly_trades = _get_trades_since(conn, week_ago)
     logger.info("Weekly trades: %d", len(weekly_trades))
 
+    # ── 1b. Fetch market news for context (before trade analysis) ─────────────
+    news_section = _format_news_section()
+    logger.info("Fetched market news section (%d chars).", len(news_section))
+
     if not weekly_trades:
         _tg_send(
             f"🔬 <b>Hermes Weekly — {date.today().isoformat()}</b>\n\n"
+            f"{news_section}\n\n"
             "No trades recorded this week. Skipping hypothesis generation.\n"
             "Running strategy review only."
         )
@@ -1240,9 +1371,13 @@ def run() -> None:
         _save_survivor(hyp, result)
 
     # ── 8. Build and send weekly Telegram report ──────────────────────────────
+    # MARKET NEWS THIS WEEK is placed before the trade analysis so the
+    # recommendations are read with real market context.
     report_lines = [
         f"🔬 <b>Hermes Weekly Research — {week_label}</b>",
         f"Trades analysed: {len(weekly_trades)}",
+        "",
+        news_section,
         "",
         "<b>Top conditions this week:</b>",
     ]
@@ -1282,6 +1417,11 @@ def run() -> None:
 
     # ── 9. Request approvals for each survivor ────────────────────────────────
     new_pending: List[Dict] = []
+
+    if DRY_RUN:
+        logger.info("DRY-RUN: skipping approval requests for %d survivor(s).",
+                    len(survivors))
+        survivors = []
 
     for hyp, result in survivors:
         approval_msg = (
