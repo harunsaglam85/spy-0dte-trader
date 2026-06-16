@@ -91,6 +91,16 @@ SIM_ORDER_ID            = 'SIM'  # sentinel order ID when running without sandbo
 # to file, but only page Telegram once per this many seconds per strategy.
 ROLLBACK_ALERT_COOLDOWN = 600.0  # 10 minutes
 
+# ── Order blacklist (FIX 1: retry-loop backoff) ────────────────────────────────
+# A strike whose buy_to_open leg keeps getting rejected was re-submitted every
+# loop with no backoff — June 15 fired 50+ orders on 750P/751P. After this many
+# consecutive buy_to_open rejections inside the window, the strike is blacklisted
+# so the entry path skips it until the cooldown expires. In-memory only (per the
+# spec): a restart clears it, acceptable for a short 30-minute backoff.
+BLACKLIST_REJECT_THRESHOLD = 3                    # consecutive buy_to_open rejects
+BLACKLIST_REJECT_WINDOW    = timedelta(minutes=10)  # ...within this window
+BLACKLIST_DURATION         = timedelta(minutes=30)  # ...blacklists the strike this long
+
 ET = pytz.timezone('America/New_York')
 
 CONTANGO_THRESHOLD = 1.05
@@ -357,6 +367,11 @@ class HermesEngine:
         self._sweep_done: bool = False
         # FIX 3: last time a rollback Telegram alert was sent, per strategy.
         self.last_rollback_alert: Dict[str, float] = {}
+        # FIX 1: retry-loop backoff. order_blacklist maps an option symbol to the
+        # ET datetime its 30-min cooldown ends; reject_history tracks recent
+        # buy_to_open rejection times per symbol. Both in-memory only.
+        self.order_blacklist: Dict[str, datetime] = {}
+        self.reject_history:  Dict[str, List[datetime]] = {}
         self._sb_hdrs    = {
             'Authorization': f'Bearer {SANDBOX_KEY}',
             'Accept':        'application/json',
@@ -647,6 +662,42 @@ class HermesEngine:
             return False
         return True
 
+    # ── Order blacklist (FIX 1) ─────────────────────────────────────────────────
+
+    def _is_blacklisted(self, option_symbol: str, now: datetime) -> bool:
+        """True while a strike is in retry-loop backoff. Expired entries are
+        cleared lazily here so the dict never grows unbounded."""
+        until = self.order_blacklist.get(option_symbol)
+        if until is None:
+            return False
+        if now >= until:
+            del self.order_blacklist[option_symbol]
+            self.reject_history.pop(option_symbol, None)
+            return False
+        return True
+
+    def _record_buy_reject(self, option_symbol: str, now: datetime) -> None:
+        """Count a buy_to_open rejection. After BLACKLIST_REJECT_THRESHOLD
+        rejections within BLACKLIST_REJECT_WINDOW, blacklist the strike for
+        BLACKLIST_DURATION so the engine stops resubmitting it every loop."""
+        hist = [t for t in self.reject_history.get(option_symbol, [])
+                if now - t <= BLACKLIST_REJECT_WINDOW]
+        hist.append(now)
+        self.reject_history[option_symbol] = hist
+        if len(hist) >= BLACKLIST_REJECT_THRESHOLD:
+            until = now + BLACKLIST_DURATION
+            self.order_blacklist[option_symbol] = until
+            self.reject_history.pop(option_symbol, None)
+            mins = int(BLACKLIST_REJECT_WINDOW.total_seconds() // 60)
+            log.warning('FIX1: %s blacklisted until %s ET after %d buy_to_open rejections in %dmin.',
+                        option_symbol, until.strftime('%H:%M'), BLACKLIST_REJECT_THRESHOLD, mins)
+            tg_send(f'⛔ HERMES: {option_symbol} blacklisted 30m after '
+                    f'{BLACKLIST_REJECT_THRESHOLD} buy_to_open rejections (retry-loop backoff).')
+
+    def _clear_buy_reject(self, option_symbol: str) -> None:
+        """A confirmed buy_to_open fill resets the consecutive-rejection counter."""
+        self.reject_history.pop(option_symbol, None)
+
     # ── Spread entry ──────────────────────────────────────────────────────────
 
     def _enter_spread(self, cfg: StrategyConfig, ms: dict, now: datetime, expiry: str) -> None:
@@ -668,6 +719,15 @@ class HermesEngine:
             log.info('%s: credit $%.2f below minimum $%.2f — skip.', cfg.name, credit, MIN_CREDIT)
             return
 
+        # FIX 1: if any leg's strike is in retry-loop backoff, skip the whole
+        # entry before submitting anything — otherwise the sell leg fills and
+        # then gets rolled back the moment the blacklisted buy_to_open is
+        # rejected again. (Close/rollback orders are never blacklisted.)
+        blacklisted = [l.option_symbol for l in legs if self._is_blacklisted(l.option_symbol, now)]
+        if blacklisted:
+            log.info('%s: skip — strike(s) in retry-loop backoff: %s', cfg.name, blacklisted)
+            return
+
         theoretical  = credit
         slippage_pct = 0.02
         fill         = round(credit * (1.0 - slippage_pct), 2)
@@ -678,6 +738,8 @@ class HermesEngine:
             if order_id:
                 submitted.append((leg, order_id))
             else:
+                if leg.side == 'buy_to_open':
+                    self._record_buy_reject(leg.option_symbol, now)  # FIX 1
                 log.error('%s: order rejected for %s — rolling back %d submitted leg(s).',
                           cfg.name, leg.option_symbol, len(submitted))
                 self._rollback_submitted(cfg.name, submitted, cfg.contracts)
@@ -698,6 +760,11 @@ class HermesEngine:
                 else:
                     unfilled.append((leg, st.get('status') or 'unknown'))
             if unfilled:
+                # FIX 1: a buy_to_open that accepted but never filled is still a
+                # rejection for retry-loop accounting.
+                for leg, status in unfilled:
+                    if leg.side == 'buy_to_open':
+                        self._record_buy_reject(leg.option_symbol, now)
                 log.error('%s: fill verification failed — %s — rolling back %d filled leg(s).',
                           cfg.name,
                           [(l.option_symbol, status) for l, status in unfilled],
@@ -742,6 +809,12 @@ class HermesEngine:
             else:
                 log.warning('%s: avg_fill_price missing for %d/%d legs — keeping modeled credit $%.2f.',
                             cfg.name, len(legs) - reported, len(legs), fill)
+
+        # FIX 1: every leg is confirmed filled here — reset the rejection counter
+        # for each buy_to_open strike so a future bad streak starts clean.
+        for leg in legs:
+            if leg.side == 'buy_to_open':
+                self._clear_buy_reject(leg.option_symbol)
 
         self.entered_today.add(cfg.name)
         profit_thresh = round(fill * (1.0 - cfg.profit_target_pct), 2)
