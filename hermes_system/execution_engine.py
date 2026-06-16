@@ -1201,6 +1201,12 @@ class HermesEngine:
 
         trade = {
             'strategy':                  pos.strategy,
+            # FIX 4: mark close records explicitly. The entry path writes a
+            # {'status': 'open'} stub; without a matching 'closed' marker here the
+            # close record had no status field at all, so Hermes (filtering on
+            # status=='closed') saw 0 closed trades and misreported P&L. exit_reason,
+            # pnl, exit_time and hold_minutes below complete the spec'd close record.
+            'status':                    'closed',
             'contracts':                 pos.contracts,
             'entry_time':                pos.entry_time.isoformat(),
             'entry_price':               pos.entry_credit,
