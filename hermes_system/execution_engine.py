@@ -645,7 +645,13 @@ class HermesEngine:
             # FIX 2: hard global VIX floor of 18 layered over each strategy's own
             # vix_min, without touching the STRATEGIES dict.
             eff_vix_min = max(cfg.vix_min, GLOBAL_VIX_FLOOR)
-            if not (eff_vix_min <= ms['vix'] < cfg.vix_max):
+            # FIX 5: a strategy in its entry window that doesn't fire because VIX is
+            # below its (effective) minimum should say so, not skip silently — this
+            # is the dominant reason strategies don't fire on low-VIX days.
+            if ms['vix'] < eff_vix_min:
+                log.info('%s: VIX %.2f below minimum %.2f — skip.', cfg.name, ms['vix'], eff_vix_min)
+                continue
+            if ms['vix'] >= cfg.vix_max:
                 continue
             if not self._extra_ok(cfg, ms):
                 continue
