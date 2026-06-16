@@ -209,7 +209,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=3, spread_width=2.0,
-        extra={'skip_fomc_weeks': True},
+        extra={},
     ),
     'R3E': StrategyConfig(
         name='R3E', entry_days=frozenset({2}),
