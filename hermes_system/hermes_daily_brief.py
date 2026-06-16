@@ -9,6 +9,7 @@ import sys
 sys.path.insert(0, '/root/spy-0dte-trader')
 
 import json
+import subprocess
 from datetime import date, datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -18,12 +19,17 @@ TRADES_DIR   = HERMES_ROOT / 'trades'
 SUMMARY_PATH = HERMES_ROOT / 'pattern_summary.json'
 BRIEF_PATH   = HERMES_ROOT / 'daily_brief.txt'
 
+ENGINE_UNIT  = 'hermes-engine'
+
 STRATEGIES = ['R3A', 'R3B', 'R3C', 'R3D', 'R3E', 'R8', 'R10', 'S4']
 
 
 # ── Loaders ───────────────────────────────────────────────────────────────────
 
 def load_today() -> List[dict]:
+    # FIX 3: P&L source of truth is the per-day trade JSON, never execution.log /
+    # main.log (legacy stale files from old screen sessions). The engine appends a
+    # close record with status='closed' and a pnl field for every closed trade.
     path = TRADES_DIR / f'{date.today().isoformat()}.json'
     if not path.exists():
         return []
@@ -40,6 +46,34 @@ def load_summary() -> dict:
         return json.loads(SUMMARY_PATH.read_text())
     except Exception:
         return {}
+
+
+def engine_status() -> str:
+    """FIX 3: live engine state via systemd, not by tailing legacy log files.
+    Returns 'active', 'inactive', 'failed', etc., or 'unknown' on error."""
+    try:
+        r = subprocess.run(
+            ['systemctl', 'is-active', ENGINE_UNIT],
+            capture_output=True, text=True, timeout=10,
+        )
+        # is-active exits non-zero when not active but still prints the state.
+        return (r.stdout.strip() or r.stderr.strip() or 'unknown')
+    except Exception as exc:
+        return f'unknown ({exc})'
+
+
+def engine_activity(max_lines: int = 8) -> List[str]:
+    """FIX 3: the last few journald lines for the engine unit, today only —
+    replaces reading execution.log / main.log."""
+    try:
+        r = subprocess.run(
+            ['journalctl', '-u', ENGINE_UNIT, '--since', 'today', '--no-pager'],
+            capture_output=True, text=True, timeout=15,
+        )
+        lines = [ln for ln in r.stdout.splitlines() if ln.strip()]
+        return lines[-max_lines:] if lines else ['(no journald entries today)']
+    except Exception as exc:
+        return [f'journald read failed: {exc}']
 
 
 # ── Formatting ────────────────────────────────────────────────────────────────
@@ -93,6 +127,16 @@ def generate_brief(today_trades: List[dict], summary: dict) -> str:
     wins        = sum(1 for t in today_trades if float(t.get('pnl', 0)) > 0)
     n           = len(today_trades)
     lines       = [f'HERMES DAILY BRIEF — {today_str}']
+
+    # ── Engine status (FIX 3) ─────────────────────────────────────────────────
+    # Placed up top so it stays inside the trigger's 2800-char input trim.
+    status = engine_status()
+    icon   = '🟢' if status == 'active' else '🔴'
+    lines.append(_sep('ENGINE'))
+    lines.append(f'  {icon} {ENGINE_UNIT}: {status}')
+    lines.append('  recent activity (journald, today):')
+    for ln in engine_activity():
+        lines.append(f'    {ln[:100]}')
 
     # ── Today's trades ────────────────────────────────────────────────────────
     lines.append(_sep('TODAY'))
