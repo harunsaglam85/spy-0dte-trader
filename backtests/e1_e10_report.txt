@@ -1,0 +1,113 @@
+==============================================================================
+  EXPERIMENTAL STRATEGIES E1-E10 BACKTEST — Low-VIX Frequency Expansion
+  Run: 2026-06-17 21:36:00
+  Data: SPY 5-min + ThetaData expiries 2021-2026 | BS pricing IV=VIX/100
+  BID_ASK=0.300 (live-calibrated) | MIN_CREDIT=$0.20 | Split <2023-07-01 IS / OOS / blind 2025
+  Kill: OOS WR<60% OR OOS Sharpe<2.0 (also drop OOS N<20)
+==============================================================================
+
+  FULL SAMPLE + OOS + BLIND SUMMARY
+  --------------------------------------------------------------------------
+  ID      N     WR        P&L     PF  Sharpe  |  oosN  oosWR  oosSh |  bldN  bldWR
+  --------------------------------------------------------------------------
+  E1     20 100.0%$  +334.27    inf  410.98  |     2 100.0% 372.20 |     0   0.0%
+  E2     17 100.0%$  +284.26    inf  393.96  |     5 100.0% 691.78 |     0   0.0%
+  E3     19  84.2%$  +184.02   3.66   10.48  |     7  57.1%  -0.54 |     0   0.0%
+  E4     17  82.4%$  +151.67   2.99    8.65  |     5  40.0%  -6.15 |     0   0.0%
+  E5     22  72.7%$  +122.24   1.86    4.78  |     4  50.0%  -3.07 |     0   0.0%
+  E6    204  92.2%$ +2978.81   6.85   16.24  |    66  87.9%  14.37 |    94  92.6%
+  E7    445  96.6%$+12877.61  21.18   32.86  |   202  94.1%  23.66 |   117  99.1%
+  E8     55  92.7%$  +785.27   7.42   17.48  |     6 100.0% 327.35 |     0   0.0%
+  E9     56  85.7%$  +611.12   4.16   11.87  |    11  63.6%   1.19 |     0   0.0%
+  E10     0   0.0%$    +0.00   0.00    0.00  |     0   0.0%   0.00 |     0   0.0%
+
+==============================================================================
+  VERDICT (kill criteria applied to OOS)
+==============================================================================
+
+  E1   ❌ KILLED     OOS N=2 <20 (insufficient)         Monday morning low-VIX put spread
+  E2   ❌ KILLED     OOS N=5 <20 (insufficient)         Tuesday low-VIX put spread
+  E3   ❌ KILLED     OOS N=7 <20 (insufficient)         Wednesday low-VIX (non-FOMC) put spread
+  E4   ❌ KILLED     OOS N=5 <20 (insufficient)         Thursday low-VIX morning put spread
+  E5   ❌ KILLED     OOS N=4 <20 (insufficient)         Friday low-VIX morning put spread
+  E6   ✅ SURVIVES   PASS                               Daily afternoon decay put spread $3w
+  E7   ✅ SURVIVES   PASS                               Low-VIX iron condor daily $3w
+  E8   ❌ KILLED     OOS N=6 <20 (insufficient)         VIX spike recovery put spread (VIX falling >1pt proxy)
+  E9   ❌ KILLED     OOS N=11 <20 (insufficient)        VWAP rejection put spread (SPY below VWAP)
+  E10  ❌ KILLED     OOS N=0 <20 (insufficient)         End-of-day premium put spread tight 1.5x stop
+
+  Survivors: ['E6', 'E7']
+==============================================================================
+
+  PER-STRATEGY DETAIL (IS / OOS / BLIND)
+  --------------------------------------------------------------------------
+
+  E1 — Monday morning low-VIX put spread
+     days=[0] window=(10, 0)-(10, 30) VIX[13,18) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  18 WR=100.0% P&L=$  +300.78 PF=  inf Sharpe=401.89 (W18/L0)
+       OOS: N=   2 WR=100.0% P&L=$   +33.49 PF=  inf Sharpe=372.20 (W2/L0)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  20 WR=100.0% P&L=$  +334.27 PF=  inf Sharpe=410.98 (W20/L0)
+
+  E2 — Tuesday low-VIX put spread
+     days=[1] window=(10, 0)-(10, 30) VIX[13,18) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  12 WR=100.0% P&L=$  +201.64 PF=  inf Sharpe=349.35 (W12/L0)
+       OOS: N=   5 WR=100.0% P&L=$   +82.62 PF=  inf Sharpe=691.78 (W5/L0)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  17 WR=100.0% P&L=$  +284.26 PF=  inf Sharpe=393.96 (W17/L0)
+
+  E3 — Wednesday low-VIX (non-FOMC) put spread
+     days=[2] window=(10, 0)-(10, 15) VIX[13,18) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  12 WR=100.0% P&L=$  +188.99 PF=  inf Sharpe=123.31 (W12/L0)
+       OOS: N=   7 WR= 57.1% P&L=$    -4.97 PF= 0.93 Sharpe= -0.54 (W4/L3)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  19 WR= 84.2% P&L=$  +184.02 PF= 3.66 Sharpe= 10.48 (W16/L3)
+
+  E4 — Thursday low-VIX morning put spread
+     days=[3] window=(9, 45)-(10, 15) VIX[13,18) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  12 WR=100.0% P&L=$  +195.63 PF=  inf Sharpe=333.18 (W12/L0)
+       OOS: N=   5 WR= 40.0% P&L=$   -43.96 PF= 0.42 Sharpe= -6.15 (W2/L3)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  17 WR= 82.4% P&L=$  +151.67 PF= 2.99 Sharpe=  8.65 (W14/L3)
+
+  E5 — Friday low-VIX morning put spread
+     days=[4] window=(9, 45)-(10, 15) VIX[13,18) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  18 WR= 77.8% P&L=$  +141.37 PF= 2.56 Sharpe=  7.43 (W14/L4)
+       OOS: N=   4 WR= 50.0% P&L=$   -19.13 PF= 0.63 Sharpe= -3.07 (W2/L2)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  22 WR= 72.7% P&L=$  +122.24 PF= 1.86 Sharpe=  4.78 (W16/L6)
+
+  E6 — Daily afternoon decay put spread $3w
+     days=[0, 1, 2, 3, 4] window=(14, 0)-(14, 30) VIX[13,20) delta=0.15 width=$3.0 put stop=2.0x
+       IS : N=  44 WR= 97.7% P&L=$  +730.86 PF=28.77 Sharpe= 38.86 (W43/L1)
+       OOS: N=  66 WR= 87.9% P&L=$  +905.70 PF= 5.33 Sharpe= 14.37 (W58/L8)
+       BLD: N=  94 WR= 92.6% P&L=$ +1342.25 PF= 5.90 Sharpe= 14.06 (W87/L7)
+       ALL: N= 204 WR= 92.2% P&L=$ +2978.81 PF= 6.85 Sharpe= 16.24 (W188/L16)
+
+  E7 — Low-VIX iron condor daily $3w
+     days=[0, 1, 3, 4] window=(10, 30)-(11, 0) VIX[13,18) delta=0.15 width=$3.0 ic stop=2.0x
+       IS : N= 126 WR= 98.4% P&L=$ +3765.77 PF=57.46 Sharpe= 52.01 (W124/L2)
+       OOS: N= 202 WR= 94.1% P&L=$ +5517.07 PF=11.57 Sharpe= 23.66 (W190/L12)
+       BLD: N= 117 WR= 99.1% P&L=$ +3594.77 PF=73.74 Sharpe= 59.21 (W116/L1)
+       ALL: N= 445 WR= 96.6% P&L=$+12877.61 PF=21.18 Sharpe= 32.86 (W430/L15)
+
+  E8 — VIX spike recovery put spread (VIX falling >1pt proxy)
+     days=[0, 1, 2, 3, 4] window=(10, 0)-(11, 0) VIX[18,22) delta=0.25 width=$2.0 put stop=2.0x
+       IS : N=  49 WR= 91.8% P&L=$  +681.77 PF= 6.57 Sharpe= 16.12 (W45/L4)
+       OOS: N=   6 WR=100.0% P&L=$  +103.50 PF=  inf Sharpe=327.35 (W6/L0)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  55 WR= 92.7% P&L=$  +785.27 PF= 7.42 Sharpe= 17.48 (W51/L4)
+
+  E9 — VWAP rejection put spread (SPY below VWAP)
+     days=[0, 1, 2, 3, 4] window=(11, 0)-(12, 0) VIX[15,22) delta=0.2 width=$2.0 put stop=2.0x
+       IS : N=  45 WR= 91.1% P&L=$  +594.85 PF= 6.86 Sharpe= 17.12 (W41/L4)
+       OOS: N=  11 WR= 63.6% P&L=$   +16.27 PF= 1.18 Sharpe=  1.19 (W7/L4)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=  56 WR= 85.7% P&L=$  +611.12 PF= 4.16 Sharpe= 11.87 (W48/L8)
+
+  E10 — End-of-day premium put spread tight 1.5x stop
+     days=[0, 1, 2, 3] window=(15, 0)-(15, 30) VIX[13,20) delta=0.1 width=$2.0 put stop=1.5x
+       IS : N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       OOS: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       BLD: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)
+       ALL: N=   0 WR=  0.0% P&L=$    +0.00 PF= 0.00 Sharpe=  0.00 (W0/L0)

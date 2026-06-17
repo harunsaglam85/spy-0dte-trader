@@ -1,0 +1,693 @@
+{
+  "E1": {
+    "cfg": {
+      "desc": "Monday morning low-VIX put spread",
+      "days": [
+        0
+      ],
+      "start": [
+        10,
+        0
+      ],
+      "end": [
+        10,
+        30
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 20,
+      "wr": 100.0,
+      "total_pnl": 334.27,
+      "pf": Infinity,
+      "sharpe": 410.98337103543815,
+      "max_dd": 0.0,
+      "wins": 20,
+      "losses": 0
+    },
+    "ins": {
+      "n": 18,
+      "wr": 100.0,
+      "total_pnl": 300.78,
+      "pf": Infinity,
+      "sharpe": 401.8865419234519,
+      "max_dd": 0.0,
+      "wins": 18,
+      "losses": 0
+    },
+    "oos": {
+      "n": 2,
+      "wr": 100.0,
+      "total_pnl": 33.489999999999995,
+      "pf": Infinity,
+      "sharpe": 372.20229470215565,
+      "max_dd": 0.0,
+      "wins": 2,
+      "losses": 0
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E2": {
+    "cfg": {
+      "desc": "Tuesday low-VIX put spread",
+      "days": [
+        1
+      ],
+      "start": [
+        10,
+        0
+      ],
+      "end": [
+        10,
+        30
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 17,
+      "wr": 100.0,
+      "total_pnl": 284.25999999999993,
+      "pf": Infinity,
+      "sharpe": 393.9597339428986,
+      "max_dd": 0.0,
+      "wins": 17,
+      "losses": 0
+    },
+    "ins": {
+      "n": 12,
+      "wr": 100.0,
+      "total_pnl": 201.64,
+      "pf": Infinity,
+      "sharpe": 349.34873771380137,
+      "max_dd": 0.0,
+      "wins": 12,
+      "losses": 0
+    },
+    "oos": {
+      "n": 5,
+      "wr": 100.0,
+      "total_pnl": 82.62,
+      "pf": Infinity,
+      "sharpe": 691.7771567955036,
+      "max_dd": 0.0,
+      "wins": 5,
+      "losses": 0
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E3": {
+    "cfg": {
+      "desc": "Wednesday low-VIX (non-FOMC) put spread",
+      "days": [
+        2
+      ],
+      "start": [
+        10,
+        0
+      ],
+      "end": [
+        10,
+        15
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ],
+      "skip_fomc": true
+    },
+    "all": {
+      "n": 19,
+      "wr": 84.21052631578947,
+      "total_pnl": 184.01999999999998,
+      "pf": 3.6611713665943593,
+      "sharpe": 10.478737567727602,
+      "max_dd": 69.14999999999999,
+      "wins": 16,
+      "losses": 3
+    },
+    "ins": {
+      "n": 12,
+      "wr": 100.0,
+      "total_pnl": 188.98999999999998,
+      "pf": Infinity,
+      "sharpe": 123.30857383665625,
+      "max_dd": 0.0,
+      "wins": 12,
+      "losses": 0
+    },
+    "oos": {
+      "n": 7,
+      "wr": 57.14285714285714,
+      "total_pnl": -4.970000000000006,
+      "pf": 0.9281272595806218,
+      "sharpe": -0.538119212274535,
+      "max_dd": 69.15,
+      "wins": 4,
+      "losses": 3
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E4": {
+    "cfg": {
+      "desc": "Thursday low-VIX morning put spread",
+      "days": [
+        3
+      ],
+      "start": [
+        9,
+        45
+      ],
+      "end": [
+        10,
+        15
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 17,
+      "wr": 82.35294117647058,
+      "total_pnl": 151.67,
+      "pf": 2.9948704458766273,
+      "sharpe": 8.647401632926165,
+      "max_dd": 60.44,
+      "wins": 14,
+      "losses": 3
+    },
+    "ins": {
+      "n": 12,
+      "wr": 100.0,
+      "total_pnl": 195.63,
+      "pf": Infinity,
+      "sharpe": 333.1836844971463,
+      "max_dd": 0.0,
+      "wins": 12,
+      "losses": 0
+    },
+    "oos": {
+      "n": 5,
+      "wr": 40.0,
+      "total_pnl": -43.959999999999994,
+      "pf": 0.4218071813757727,
+      "sharpe": -6.1461263184288155,
+      "max_dd": 60.44,
+      "wins": 2,
+      "losses": 3
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E5": {
+    "cfg": {
+      "desc": "Friday low-VIX morning put spread",
+      "days": [
+        4
+      ],
+      "start": [
+        9,
+        45
+      ],
+      "end": [
+        10,
+        15
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 22,
+      "wr": 72.72727272727273,
+      "total_pnl": 122.23999999999997,
+      "pf": 1.8556628867422655,
+      "sharpe": 4.781523600525601,
+      "max_dd": 98.57000000000001,
+      "wins": 16,
+      "losses": 6
+    },
+    "ins": {
+      "n": 18,
+      "wr": 77.77777777777779,
+      "total_pnl": 141.36999999999998,
+      "pf": 2.561926858910618,
+      "sharpe": 7.427498749301144,
+      "max_dd": 46.22,
+      "wins": 14,
+      "losses": 4
+    },
+    "oos": {
+      "n": 4,
+      "wr": 50.0,
+      "total_pnl": -19.130000000000003,
+      "pf": 0.634574976122254,
+      "sharpe": -3.0709467353844597,
+      "max_dd": 52.35,
+      "wins": 2,
+      "losses": 2
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E6": {
+    "cfg": {
+      "desc": "Daily afternoon decay put spread $3w",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "start": [
+        14,
+        0
+      ],
+      "end": [
+        14,
+        30
+      ],
+      "vix_min": 13,
+      "vix_max": 20,
+      "delta": 0.15,
+      "width": 3.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 204,
+      "wr": 92.15686274509804,
+      "total_pnl": 2978.8099999999995,
+      "pf": 6.848372403502572,
+      "sharpe": 16.24215506633913,
+      "max_dd": 81.48000000000002,
+      "wins": 188,
+      "losses": 16
+    },
+    "ins": {
+      "n": 44,
+      "wr": 97.72727272727273,
+      "total_pnl": 730.8599999999998,
+      "pf": 28.768237082066857,
+      "sharpe": 38.85607441213791,
+      "max_dd": 26.319999999999993,
+      "wins": 43,
+      "losses": 1
+    },
+    "oos": {
+      "n": 66,
+      "wr": 87.87878787878788,
+      "total_pnl": 905.6999999999999,
+      "pf": 5.329970837118134,
+      "sharpe": 14.369833790408412,
+      "max_dd": 60.81,
+      "wins": 58,
+      "losses": 8
+    },
+    "bld": {
+      "n": 94,
+      "wr": 92.5531914893617,
+      "total_pnl": 1342.25,
+      "pf": 5.901405879130911,
+      "sharpe": 14.055065899387563,
+      "max_dd": 81.48000000000002,
+      "wins": 87,
+      "losses": 7
+    }
+  },
+  "E7": {
+    "cfg": {
+      "desc": "Low-VIX iron condor daily $3w",
+      "days": [
+        0,
+        1,
+        3,
+        4
+      ],
+      "start": [
+        10,
+        30
+      ],
+      "end": [
+        11,
+        0
+      ],
+      "vix_min": 13,
+      "vix_max": 18,
+      "delta": 0.15,
+      "width": 3.0,
+      "spread": "ic",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ]
+    },
+    "all": {
+      "n": 445,
+      "wr": 96.62921348314607,
+      "total_pnl": 12877.610000000011,
+      "pf": 21.179281058041887,
+      "sharpe": 32.85733113538602,
+      "max_dd": 51.18000000000029,
+      "wins": 430,
+      "losses": 15
+    },
+    "ins": {
+      "n": 126,
+      "wr": 98.4126984126984,
+      "total_pnl": 3765.770000000001,
+      "pf": 57.45832083958022,
+      "sharpe": 52.00608428891364,
+      "max_dd": 50.88999999999987,
+      "wins": 124,
+      "losses": 2
+    },
+    "oos": {
+      "n": 202,
+      "wr": 94.05940594059405,
+      "total_pnl": 5517.069999999999,
+      "pf": 11.568289786223284,
+      "sharpe": 23.66024222803935,
+      "max_dd": 51.179999999999836,
+      "wins": 190,
+      "losses": 12
+    },
+    "bld": {
+      "n": 117,
+      "wr": 99.14529914529915,
+      "total_pnl": 3594.7700000000013,
+      "pf": 73.73917442331043,
+      "sharpe": 59.211578338991096,
+      "max_dd": 49.420000000000016,
+      "wins": 116,
+      "losses": 1
+    }
+  },
+  "E8": {
+    "cfg": {
+      "desc": "VIX spike recovery put spread (VIX falling >1pt proxy)",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "start": [
+        10,
+        0
+      ],
+      "end": [
+        11,
+        0
+      ],
+      "vix_min": 18,
+      "vix_max": 22,
+      "delta": 0.25,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ],
+      "require_vix_falling": true
+    },
+    "all": {
+      "n": 55,
+      "wr": 92.72727272727272,
+      "total_pnl": 785.2699999999999,
+      "pf": 7.418226399673068,
+      "sharpe": 17.48208924565183,
+      "max_dd": 52.200000000000045,
+      "wins": 51,
+      "losses": 4
+    },
+    "ins": {
+      "n": 49,
+      "wr": 91.83673469387756,
+      "total_pnl": 681.7699999999999,
+      "pf": 6.5722926031875755,
+      "sharpe": 16.118143456134423,
+      "max_dd": 52.200000000000045,
+      "wins": 45,
+      "losses": 4
+    },
+    "oos": {
+      "n": 6,
+      "wr": 100.0,
+      "total_pnl": 103.5,
+      "pf": Infinity,
+      "sharpe": 327.35186010005134,
+      "max_dd": 0.0,
+      "wins": 6,
+      "losses": 0
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E9": {
+    "cfg": {
+      "desc": "VWAP rejection put spread (SPY below VWAP)",
+      "days": [
+        0,
+        1,
+        2,
+        3,
+        4
+      ],
+      "start": [
+        11,
+        0
+      ],
+      "end": [
+        12,
+        0
+      ],
+      "vix_min": 15,
+      "vix_max": 22,
+      "delta": 0.2,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 2.0,
+      "force_exit": [
+        15,
+        45
+      ],
+      "require_below_vwap": true
+    },
+    "all": {
+      "n": 56,
+      "wr": 85.71428571428571,
+      "total_pnl": 611.1200000000003,
+      "pf": 4.157753319898725,
+      "sharpe": 11.874679783391633,
+      "max_dd": 47.26999999999987,
+      "wins": 48,
+      "losses": 8
+    },
+    "ins": {
+      "n": 45,
+      "wr": 91.11111111111111,
+      "total_pnl": 594.8500000000001,
+      "pf": 6.857128790862545,
+      "sharpe": 17.120011668355602,
+      "max_dd": 31.77000000000001,
+      "wins": 41,
+      "losses": 4
+    },
+    "oos": {
+      "n": 11,
+      "wr": 63.63636363636363,
+      "total_pnl": 16.270000000000007,
+      "pf": 1.1769055126671741,
+      "sharpe": 1.1924838573096461,
+      "max_dd": 47.269999999999996,
+      "wins": 7,
+      "losses": 4
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  },
+  "E10": {
+    "cfg": {
+      "desc": "End-of-day premium put spread tight 1.5x stop",
+      "days": [
+        0,
+        1,
+        2,
+        3
+      ],
+      "start": [
+        15,
+        0
+      ],
+      "end": [
+        15,
+        30
+      ],
+      "vix_min": 13,
+      "vix_max": 20,
+      "delta": 0.1,
+      "width": 2.0,
+      "spread": "put",
+      "keep": 0.75,
+      "stop_mult": 1.5,
+      "force_exit": [
+        15,
+        55
+      ]
+    },
+    "all": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    },
+    "ins": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    },
+    "oos": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    },
+    "bld": {
+      "n": 0,
+      "wr": 0,
+      "total_pnl": 0,
+      "pf": 0,
+      "sharpe": 0,
+      "max_dd": 0,
+      "wins": 0,
+      "losses": 0
+    }
+  }
+}

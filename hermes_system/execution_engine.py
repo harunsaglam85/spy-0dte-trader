@@ -328,6 +328,29 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         contracts=1, spread_width=2.0,
         extra={'require_vix_falling': True},
     ),
+    # ── E-strategies (June 17 low-VIX frequency study) — 1 contract each ────────
+    # Only E6 and E7 survived the live-calibrated backtest (sp=0.30 bid/ask, which
+    # reproduces the Day-5 live fill of $0.15-0.19 at VIX 16.3); E1-E5/E8-E10 never
+    # clear MIN_CREDIT in low VIX once realistic spreads are applied. See
+    # /root/hermes_system/research/new_strategies_june17.md.
+    # NOTE: both keep their as-designed vix_min, so GLOBAL_VIX_FLOOR=18 still
+    # governs — E7 (13-18) will NOT fire until/unless the floor is revisited, and
+    # E6 (13-20) only fires in 18-20. Added per operator decision to collect live
+    # data behind the existing gates, not to bypass them.
+    'E6_afternoon_decay': StrategyConfig(
+        name='E6_afternoon_decay', entry_days=frozenset({0, 1, 2, 3, 4}),
+        entry_start=(14, 0), entry_end=(14, 30),
+        spread_type='put_spread', vix_min=13.0, vix_max=20.0, delta_target=0.15,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=3.0,
+    ),
+    'E7_lowvix_ic': StrategyConfig(
+        name='E7_lowvix_ic', entry_days=frozenset({0, 1, 3, 4}),
+        entry_start=(10, 30), entry_end=(11, 0),
+        spread_type='iron_condor', vix_min=13.0, vix_max=18.0, delta_target=0.15,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=3.0,
+    ),
 }
 
 
