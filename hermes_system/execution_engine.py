@@ -449,10 +449,10 @@ class HermesEngine:
             now = datetime.now(ET)
             if now.date() != self.today:
                 self._reset_daily()
+            self._touch_heartbeat(now)
             if not self._is_market_hours(now):
                 time.sleep(60)
                 continue
-            self._touch_heartbeat(now)
             # R1: one batched Tradier quote call per iteration covers SPY, VIX,
             # and every open leg — instead of one 18s-throttled call each, which
             # stretched the "60-second" risk loop to 2-5 minutes under load.
