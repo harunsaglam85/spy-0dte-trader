@@ -1,14 +1,15 @@
-﻿# Algorithmic Options Trading System
+# SPY 0DTE Algorithmic Options Trader
 
-![Python](https://img.shields.io/badge/Python-3.12-3776AB?style=flat&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10-3776AB?style=flat&logo=python&logoColor=white)
 ![License](https://img.shields.io/badge/License-MIT-green?style=flat)
-![Status](https://img.shields.io/badge/Status-Active-brightgreen?style=flat)
-![Cloud](https://img.shields.io/badge/Cloud-Oracle%20Free%20Tier-red?style=flat&logo=oracle)
-![Data](https://img.shields.io/badge/Data-ThetaData%20Real%20Bid%2FAsk-blue?style=flat)
+![Status](https://img.shields.io/badge/Status-Paper%20Trading-orange?style=flat)
+![Cloud](https://img.shields.io/badge/Cloud-Hetzner%20CCX13-red?style=flat)
+![Data](https://img.shields.io/badge/Data-ThetaData%20Standard-blue?style=flat)
+![Strategies](https://img.shields.io/badge/Strategies-21%20Active-brightgreen?style=flat)
 
-**Production-grade SPY options trading system with adversarial backtesting, real bid/ask validation, and 24/7 cloud deployment.**
+**Production-grade SPY 0DTE options trading system with AI-powered research, real-time risk management, and 24/7 autonomous operation.**
 
-Five strategies run simultaneously on Oracle Cloud Always Free, managed by a self-learning performance tracker that monitors VIX regime, time-of-day, and day-of-week performance drift in real time.
+21 strategies run simultaneously on Hetzner CCX13, managed by Hermes — an AI agent that monitors performance, runs weekly strategy research, and sends real-time Telegram alerts.
 
 ---
 
@@ -16,344 +17,222 @@ Five strategies run simultaneously on Oracle Cloud Always Free, managed by a sel
 
 | Component | Detail |
 |---|---|
-| Deployment | Oracle Cloud Always Free (Ubuntu 20.04) — 24/7 uptime |
-| Strategies running | 5 simultaneously (Config D, Credit Spread, 5-DTE, Earnings, VPIN) |
-| Orchestrator | `main.py` — polls every 5 min, manages kill switches & daily resets |
-| Self-learning engine | `core/performance.py` — VIX bucket, time-of-day, day-of-week analysis |
-| Dashboard | Flask + Chart.js web UI with live P&L and strategy diagnostics |
-| Broker | Tastytrade (OAuth2) + Tradier for real-time quotes |
-| Database | SQLite WAL — all trades, suggestions, and metrics persisted |
+| Deployment | Hetzner CCX13 (Ubuntu 22.04) — 24/7 systemd managed |
+| Strategies | 21 active (8 confirmed × 3 contracts, 13 experimental × 1 contract) |
+| Execution engine | `hermes_system/execution_engine.py` — 60s risk loop |
+| AI research agent | Hermes (Claude Sonnet) — daily briefs, Sunday strategy research |
+| Options data | ThetaData Standard — real bid/ask, v3 REST API |
+| Quotes + greeks | Tradier production API — VIX, VIX3M, SPY, options chain |
+| Broker | Tradier sandbox (paper) → production at go-live |
+| Alerts | Telegram bot — real-time entries, exits, rollbacks, daily reports |
 
-> The performance tracker runs after every closed trade and every 10 trades per strategy. It surfaces parameter-drift suggestions to human review — it **never auto-applies them**.
+---
 
+## Strategy Performance (5-Year Backtest)
+
+All strategies validated with 60/40 walk-forward split, blind 2025 holdout, and 2,000-session bootstrap CI.
+
+### Confirmed Strategies (3 contracts each)
+
+| Strategy | Entry | VIX Range | OOS WR | Blind WR | Sharpe | Status |
+|---|---|---|---|---|---|---|
+| R3A — Monday put spread | Mon 10:30 AM | 15–22 | 91.0% | 89.2% | 14.59 | ✅ Active |
+| R3B — Wednesday put spread | Wed 10:30 AM | 15–22 | 78.6% | 81.3% | 11.2 | ✅ Active |
+| R3D — Mon/Wed/Fri put spread | MWF 10:15 AM | 15–22 | 79.5% | 83.0% | 12.4 | ✅ Active |
+| R3E — Wednesday iron condor | Wed 10:30 AM | 13–18 | 98.0% | 100% | 41.77 | ✅ Active |
+| R8 — Friday 1PM + VWAP | Fri 1:00 PM | 15–22 | 80.4% | 82.1% | 10.8 | ✅ Active |
+| R10 — Tuesday above VWAP | Tue 10:30 AM | 15–22 | 84.8% | 86.2% | 13.1 | ✅ Active |
+
+### Combined Portfolio (OOS)
+N=662  WR=83.5%  P&L=+$7,712  Sharpe=14.59
+
+Blind 2025: N=410  WR=85.9%  P&L=+$4,949
+
+Profitable in every year 2021–2026 including 2022 bear market
 ---
 
 ## Key Research Findings
 
-**2,500+ backtested scenarios. 5 years of real ThetaData bid/ask pricing. One finding dominated everything else:**
+### The VIX Term Structure Edge
 
-> *Only strategies with large expected moves survive real bid/ask spreads.*
-> Strategies that looked profitable on synthetic Black-Scholes pricing lost 50-90% of their edge when re-run on actual EOD bid/ask quotes. Small-premium strategies that appear viable on midpoints get destroyed by real fills.
+The single most important filter discovered across 1,357 trading days:
 
-### The Bid/Ask Reality Check
+| Regime | Condition | WR | Sharpe |
+|---|---|---|---|
+| Strong contango | VIX3M/VIX ≥ 1.10 | 86.2% | 13.65 |
+| Contango | VIX3M/VIX ≥ 1.05 | 84.2% | 12.61 |
+| Neutral | VIX3M/VIX 1.00–1.05 | 71.8% | 4.2 |
+| Backwardation | VIX3M/VIX < 1.00 | 41.6% | -1.02 |
 
-| Strategy | Synthetic P&L | Real Data P&L | Delta | Verdict |
-|---|---|---|---|---|
-| Credit Spread 0DTE | +$2,948 | +$2,540 | -14% | **Survived** |
-| 5-DTE Momentum | +$28,098 | +$3,995 | -86% | Downgraded B to C |
-| FOMC/CPI Catalyst | +$5,404 | +$178 | -97% | **Dead** |
-| Earnings Momentum | +$26,882 | +$26,882 | 0% | **Survived** |
-| Iron Condor 0DTE | -$1,990 | -$4,064 | worse | **Dead** |
+Trading only in contango eliminates 15% of trading days that account for nearly all losses.
 
-The Credit Spread kept 86% of its synthetic edge on real pricing — the only 0DTE strategy to do so. Everything with small expected moves (FOMC directional bets, iron condor premium harvesting) collapsed.
+### VIX Floor (18+)
+At VIX < 17, 90.7% of days have no tradeable credit on $2-wide spreads. The VIX 18 global floor was added after live data confirmed this — paper trading on Jun 15 at VIX 16.3 saw zero fills all session.
 
----
-
-## Strategy Research Results
-
-All strategies were validated with:
-- **Pre-registered kill criteria** locked before seeing out-of-sample results
-- **5-year walk-forward** (2021-2026) with expanding training windows
-- **Blind 2025 holdout** — never touched during development
-- **Bootstrap P(positive)** with 10,000 simulated sessions
-- **Minimum 30 OOS trades** required for any grade above C
-
-### Full Strategy Comparison Table
-
-| Strategy | IS Trades | OOS Trades | OOS WR | OOS PF | Real P&L | Grade | Status |
-|---|---|---|---|---|---|---|---|
-| Credit Spread 0DTE | 207 | 70 | **81.4%** | **2.32** | **+$3,639** | **A** | **Active** |
-| Earnings Momentum | 31 | 33 | 33.3% | 2.30 | +$26,882 | **A** | Active |
-| Config D (Mon/Fri 0DTE) | — | 100 | 67.0% | 2.02 | — | B | Active |
-| 5-DTE Momentum | 262 | 127 | 46.5% | 1.66 | +$3,995 | C | Research |
-| Earnings Straddle | 74 | 67 | 46.3% | 1.56 | — | C | Research |
-| FOMC/CPI Catalyst | 31 | 9 | **11.1%** | 0.01 | -$4,443 | **F** | **Dead** |
-| Iron Condor 0DTE | 135 | 5 | 0.0% | N/A | -$4,064 | **F** | **Dead** |
-| VIX Spike Mean Reversion | 1 | 6 | 50.0% | 1.54 | — | Dead | Dead |
-| Post-Earnings Continuation | 19 | 18 | 22.2% | 0.72 | — | Dead | Dead |
-| Single Stock Momentum | 16 | 19 | 42.1% | 1.33 | — | Dead | Dead |
-
-**Grade Key:** A = Deploy-ready | B = Pilot only | C = Research | F = No edge | Dead = Failed pre-registered kill criterion
-
-### Credit Spread Deep Dive (Grade A)
-
-The only 0DTE strategy that passed every kill criterion, including blind 2025 validation:
-
-```
-Full period  (2021-2026): N=277  WR=78.7%  PF=2.32  Sharpe=5.94  Boot=100%
-Blind 2025 (unseen):      N= 70  WR=81.4%  P&L=+$849
-Profitable in every calendar year from 2021 to 2026, including the 2022 bear market.
-```
-
-Year-by-year breakdown (real ThetaData bid/ask, no synthetic pricing):
-
-| Year | Trades | Win Rate | P&L | PF |
-|---|---|---|---|---|
-| 2021 | 77 | 80.5% | +$1,438 | 2.99 |
-| 2022 (bear) | 20 | 60.0% | +$9 | 1.02 |
-| 2023 | 54 | 79.6% | +$708 | 2.03 |
-| 2024 | 29 | 96.6% | +$384 | 21.31 |
-| 2025 (blind) | 70 | 81.4% | +$849 | — |
-
-**Why it works:** The put credit spread on SPY 0DTE captures structural short-vol premium on low-VIX trend days. The entry filter (VIX 15-22, Mon/Fri only, morning bias confirmed) eliminates the events where spreads blow out. Real bid/ask pricing barely dents the edge because the spread width is wide enough to absorb realistic fills.
-
-### What Killed Every Other Strategy
-
-**FOMC/CPI (OOS WR 11.1%):** Market makers widen spreads most aggressively on macro event days. Real bid/ask pricing revealed the synthetic P&L of +$5,404 was entirely an artifact of midpoint pricing. OOS real P&L: -$4,443.
-
-**Iron Condor 0DTE:** 39.3% WR with wide spreads. The short wing gets hit by the same tail events that iron condors are supposed to profit from. Real pricing reduced already-negative returns further.
-
-**5-DTE Momentum:** Synthetic pricing showed a Grade B result (+$28k). Real data collapsed this to +$4k (Grade C). 5-DTE ATM options have wide bid/ask that consume most of the expected edge on marginal signal entries.
+### Credit Threshold
+$0.20 minimum credit is the validated floor. The $0.10–$0.19 band shows 0% WR in live data. $0.40+ is unreachable on standard $2-wide 0.20-delta spreads.
 
 ---
 
 ## Architecture
+┌─────────────────────────────────────────────────────────┐
 
-```
-+---------------------------------------------------------------------+
-|                         DATA LAYER                                  |
-|                                                                     |
-|  +-----------+  +-----------+  +-----------+  +------------------+  |
-|  |  Tradier  |  |  Alpaca   |  | ThetaData |  |    yfinance      |  |
-|  |  (quotes) |  | (5m bars) |  | (EOD opts)|  |  (VIX, daily)   |  |
-|  +-----+-----+  +-----+-----+  +-----+-----+  +--------+---------+  |
-|        +---------------+---------------+----------------+           |
-|                         core/data_feeds.py                          |
-+--------------------------------+------------------------------------+
-                                 |
-+--------------------------------v------------------------------------+
-|                      STRATEGY LAYER                                 |
-|                                                                     |
-|  +-----------+  +---------------+  +--------+  +---------------+   |
-|  | Config D  |  | Credit Spread |  | 5-DTE  |  |   Earnings    |   |
-|  |(Mon/Fri   |  |(0DTE put      |  |(ATM    |  |(pre-earnings  |   |
-|  | 0DTE call)|  | spread)       |  | calls) |  | momentum)     |   |
-|  +-----+-----+  +------+--------+  +---+----+  +-------+-------+   |
-|        +----------------+--------------+--------------+            |
-|                                          +----------+              |
-|                                          |   VPIN   |              |
-|                                          |(flow tox)|              |
-|                                          +----------+              |
-+--------------------------------+------------------------------------+
-                                 |
-+--------------------------------v------------------------------------+
-|                    ORCHESTRATION LAYER                              |
-|                                                                     |
-|   main.py — Master Orchestrator                                     |
-|   +-- 5-minute polling loop (respects Tradier rate limits)          |
-|   +-- Per-strategy loss limits ($500/strategy, $2,000/day total)    |
-|   +-- Kill switches (file-based, no restart needed)                 |
-|   +-- End-of-day reporting                                          |
-|                                                                     |
-|   core/performance.py — Self-Learning Engine                        |
-|   +-- VIX bucket analysis (calm / normal / stressed / crisis)       |
-|   +-- Time-of-day performance breakdown                             |
-|   +-- Day-of-week analysis — suggestions only, never auto-applied   |
-|                                                                     |
-|   core/database.py — SQLite WAL                                     |
-|   +-- All trades, suggestions, and daily summaries persisted        |
-+--------------------------------+------------------------------------+
-                                 |
-+--------------------------------v------------------------------------+
-|                   DEPLOYMENT & MONITORING                           |
-|                                                                     |
-|   Oracle Cloud Always Free (Ubuntu 20.04 ARM)                       |
-|   +-- Docker container — python:3.12-slim                           |
-|   +-- Healthcheck: log recency check every 30s                      |
-|   +-- dashboard.py — Flask web UI (Chart.js)                        |
-|   +-- morning_briefing.py — pre-market signal summary               |
-+---------------------------------------------------------------------+
-```
+│                      DATA LAYER                          │
+
+│  Tradier │ ThetaData v3 │ Alpaca │ yfinance │ OpenBB    │
+
+│              core/data_feeds.py                         │
+
+└──────────────────────┬──────────────────────────────────┘
+
+│
+
+┌──────────────────────▼──────────────────────────────────┐
+
+│                   STRATEGY LAYER                         │
+
+│  R-series (confirmed) │ T-series (experimental)         │
+
+│  Filters: VIX ≥18, contango ≥1.05, credit ≥$0.20       │
+
+└──────────────────────┬──────────────────────────────────┘
+
+│
+
+┌──────────────────────▼──────────────────────────────────┐
+
+│              HERMES EXECUTION ENGINE                     │
+
+│  execution_engine.py                                    │
+
+│  • Order-ID fill verification (C5)                      │
+
+│  • Atomic writes — positions.json + trade logs          │
+
+│  • Strike blacklist — repeated rejection guard          │
+
+│  • VIX term structure check (hourly)                    │
+
+│  • Force-exit sweep 3:58 PM ET                          │
+
+│  • Heartbeat monitoring (U3)                            │
+
+└──────┬──────────────────┬──────────────────┬────────────┘
+
+│                  │                  │
+
+┌──────▼──────┐  ┌────────▼────────┐  ┌─────▼──────────┐
+
+│   Tradier   │  │  Hermes AI      │  │  Hetzner CCX13 │
+
+│   Sandbox   │  │  Agent          │  │  systemd       │
+
+│   (paper)   │  │  Telegram bot   │  │  24/7 uptime   │
+
+└─────────────┘  └─────────────────┘  └────────────────┘
 
 ---
 
-## Tech Stack
+## Infrastructure
 
-### Core
 | Layer | Technology |
 |---|---|
-| Language | Python 3.12 |
-| Containerization | Docker (python:3.12-slim) |
-| Cloud | Oracle Cloud Always Free — ARM Ubuntu 20.04 |
-| Database | SQLite with WAL mode |
-
-### Data & Pricing
-| Source | Data |
-|---|---|
-| ThetaData | Real EOD option bid/ask quotes (backtesting) |
-| Tradier | Real-time option quotes, live fills |
-| Alpaca Markets | 5-minute SPY bars (intraday) |
-| yfinance | VIX daily, earnings calendar |
-| Polygon | Supplementary tick data |
-
-### Libraries
-| Package | Purpose |
-|---|---|
-| `py_vollib` | Black-Scholes IV and Greeks from real bid/ask |
-| `alpaca-py` | Alpaca Markets SDK |
-| `pandas` / `numpy` | Data processing |
-| `scipy` | Bootstrap statistics, confidence intervals |
-| `Flask` | Web dashboard |
-| `Chart.js` | Frontend charting |
-| `schedule` | Polling loop management |
-| `pytz` | US Eastern time handling |
-
-### Brokers & APIs
-| Broker | Auth | Use |
-|---|---|---|
-| Tastytrade | OAuth2 refresh token | Live paper/real trading |
-| Tradier | API key | Real-time option chain quotes |
-| Alpaca Markets | API key + secret | 5-min SPY bars |
+| Server | Hetzner CCX13 — 4 vCPU, 8GB RAM, Ubuntu 22.04 |
+| Process management | systemd — `hermes-engine.service`, `thetadata.service` |
+| Options data | ThetaData Terminal v3 — local REST API port 25503 |
+| Quotes + greeks | Tradier production API |
+| Intraday VWAP | Tradier timesales — real-time 5-min bars |
+| AI agent | Hermes (Claude Sonnet via OpenRouter) |
+| Alerts | Telegram Bot API — real-time two-way |
+| News sentiment | yfinance + OpenBB |
+| Language | Python 3.10 |
+| Key packages | pandas, numpy, scipy, requests, pytz, python-dotenv |
 
 ---
 
-## Backtesting Methodology
+## Risk Controls
 
-Every strategy was subject to the same adversarial pipeline before being considered for deployment.
-
-### Pipeline
-
-```
-1. Hypothesis definition
-   +-- Pre-register kill criteria BEFORE seeing any OOS data
-
-2. In-sample fitting (2021 - mid-2023)
-   +-- Parameter search, filter design, entry/exit logic
-
-3. Out-of-sample test (mid-2023 - end-2024)
-   +-- No further parameter changes after this step
-
-4. Blind holdout (all of 2025)
-   +-- Opened only after OOS verdict is recorded
-
-5. Real bid/ask validation (ThetaData EOD)
-   +-- Re-run every IS/OOS/blind split with real fills
-   +-- Synthetic results discarded if real delta > 30%
-
-6. Bootstrap statistical validation
-   +-- 10,000 sessions with daily-block resampling
-   +-- Report P(positive total return) and 95% CI
-
-7. Adversarial case construction
-   +-- Write the strongest possible argument AGAINST deployment
-   +-- Deployment approved only if adversarial case cannot identify
-       a structural flaw in the real-data OOS result
-```
-
-### Standards
-
-- **Look-ahead bias:** All indicators computed using only prior-bar data. Verified by code review.
-- **Survivorship bias:** Universe fixed at the start of the study; no adding tickers that performed well.
-- **Real pricing:** ThetaData EOD bid/ask used for all final P&L calculations. Synthetic Black-Scholes used only for initial exploration.
-- **Minimum sample size:** 30 OOS trades required for Grade B or above.
-- **Pre-registered kill criteria:** Written and locked in the report header before any OOS data is opened.
-
----
-
-## Project Structure
-
-```
-spy-0dte-trader/
-+-- main.py                    # Master orchestrator
-+-- dashboard.py               # Flask web UI
-+-- morning_briefing.py        # Pre-market signal summary
-+-- paper_trader.py            # Standalone paper trading bot
-|
-+-- core/
-|   +-- database.py            # SQLite WAL
-|   +-- data_feeds.py          # Unified data layer
-|   +-- performance.py         # Self-learning performance tracker
-|   +-- reporter.py            # End-of-day P&L reporting
-|
-+-- strategies/
-|   +-- config_d.py            # 0DTE momentum — Mon/Fri, VIX<20, calls only
-|   +-- credit_spread.py       # 0DTE put credit spread — Grade A
-|   +-- five_dte.py            # 5-DTE ATM momentum — Grade C
-|   +-- earnings.py            # Pre-earnings momentum — Grade A
-|   +-- vpin.py                # Volume-price imbalance — experimental
-|
-+-- backtest_real_data.py      # Full 5-year real bid/ask backtest engine
-+-- find_edge.py               # Edge scanner
-+-- edge_scan_historical.py    # Historical edge detection
-+-- monte_carlo.py             # Monte Carlo simulation and risk analysis
-|
-+-- data/
-|   +-- earnings_calendar.json
-|
-+-- Dockerfile                 # python:3.12-slim, 30s healthcheck
-```
+| Control | Value |
+|---|---|
+| VIX minimum (global floor) | 18 |
+| VIX3M/VIX contango minimum | 1.05 |
+| Minimum credit | $0.20 |
+| Max daily loss | $8,000 (paper) → $750 live |
+| Confirmed strategy contracts | 3 |
+| Experimental strategy contracts | 1 |
+| Force exit time | 3:45–3:58 PM ET |
+| Strike blacklist | 30min after 3 consecutive rejections |
+| Rollback | Immediate on any leg rejection |
 
 ---
 
 ## Deployment
 
-### Oracle Cloud Setup
-
 ```bash
-git clone https://github.com/yourusername/spy-0dte-trader
+git clone https://github.com/harunsaglam85/spy-0dte-trader
 cd spy-0dte-trader
 cp .env.example .env
+# Add API keys to .env
 
-docker build -t spy-trader .
-docker run -d \
-  --name spy-trader \
-  --restart unless-stopped \
-  --env-file .env \
-  -p 5000:5000 \
-  spy-trader
+systemctl enable hermes-engine thetadata
+systemctl start thetadata
+sleep 10
+systemctl start hermes-engine
 ```
 
 ### Environment Variables
-
-```
 TRADIER_API_KEY=...
-TASTYTRADE_CLIENT_SECRET=...
-TASTYTRADE_REFRESH_TOKEN=...
-TASTYTRADE_ACCOUNT_ID=...
-TASTYTRADE_USE_PRODUCTION=true
+
+TRADIER_SANDBOX_KEY=...
+
+TRADIER_SANDBOX_ACCOUNT_ID=...
+
 ALPACA_API_KEY=...
+
 ALPACA_SECRET_KEY=...
+
 THETADATA_USERNAME=...
+
 THETADATA_PASSWORD=...
+
+TELEGRAM_BOT_TOKEN=...
+
+TELEGRAM_CHAT_ID=...
+
+OPENROUTER_API_KEY=...
+---
+
+## Backtesting
+
+```bash
+python3 backtest_real_data.py          # 5-year real bid/ask backtest
+python3 vix_ts_backtest.py             # VIX term structure analysis
+python3 hermes_researcher.py --dry-run # Weekly research dry run
+python3 backtests/credit_hypothesis_backtest.py  # Hypothesis testing
 ```
-
-### Risk Controls
-
-| Control | Value | Layer |
-|---|---|---|
-| Max loss per strategy per day | $500 | Orchestrator |
-| Max total daily loss | $2,000 | Orchestrator |
-| Per-trade max premium | $500/contract | Strategy |
-| Max contracts per trade | 2 | Strategy |
-| Cooldown between trades | 10 min | Strategy |
-| Hard time stop | 15:15 ET | All strategies |
-| Kill switch | file-based | Orchestrator |
 
 ---
 
-## Running Backtests
+## Paper Trading Status
 
-```bash
-python backtest_real_data.py      # 5-year real bid/ask backtest
-python backtest_adversarial.py    # adversarial multi-strategy report
-python find_edge.py               # hypothesis scanner
-python monte_carlo.py             # risk simulation
-```
+| Day | Date | P&L | Notes |
+|---|---|---|---|
+| 1–2 | Jun 9–10 | $0 | Infrastructure shakeout |
+| 3 | Jun 11 | +$366 | First clean trades |
+| 4 | Jun 12 | +$1,260 clean | Sandbox issues |
+| 5 | Jun 15 | +$321 | Low VIX day |
+| 6–7 | Jun 16–17 | $0 | VIX below floor |
+
+**Cumulative clean P&L: +$1,947**
 
 ---
 
 ## Research Philosophy
 
-Three rules shaped every decision in this project:
-
-**1. Assume the strategy is dead until proven otherwise.**
-Every strategy starts with pre-registered kill criteria written before any out-of-sample data is opened. The default verdict is DEAD.
-
-**2. Real bid/ask or it did not happen.**
-Every strategy that showed a synthetic edge was re-run on ThetaData real EOD bid/ask quotes. Strategies where the delta exceeded 30% were rejected regardless of in-sample performance. This is how the 5-DTE strategy went from Grade B (synthetic) to Grade C (real), and how FOMC/CPI was killed entirely.
-
-**3. Write the adversarial case first.**
-Before declaring any strategy viable, the strongest possible argument against deploying it is written explicitly. If the adversarial case identifies a structural flaw — survivorship bias, regime dependency, small sample — the strategy is not deployed until that concern is addressed.
+1. **Assume dead until proven otherwise** — pre-registered kill criteria before any OOS data
+2. **Real bid/ask or it did not happen** — ThetaData EOD pricing for all backtests
+3. **Adversarial case first** — strongest argument against deployment written explicitly
+4. **AI-assisted research** — Hermes runs weekly backtests, surfaces hypotheses, waits for human approval before any config change
 
 ---
 
@@ -363,4 +242,4 @@ MIT License — see [LICENSE](LICENSE) for details.
 
 ---
 
-*Built with real market data, adversarial backtesting, and a healthy respect for what bid/ask spreads actually cost.*
+*Built with ThetaData real options pricing, adversarial backtesting, and an AI research agent that learns from every trade.*
