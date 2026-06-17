@@ -1,1 +1,50 @@
 2026-06-07 16:00:01,685 hermes INFO ═══ Hermes Researcher starting — 2026-06-07T16:00:01.685870 ═══
+2026-06-14 16:00:01,404 hermes INFO ═══ Hermes Researcher starting — 2026-06-14T16:00:01.404936 ═══
+2026-06-16 02:39:14,565 hermes INFO ═══ Hermes Researcher starting — 2026-06-16T02:39:14.565698 ═══
+2026-06-16 02:39:14,566 hermes INFO DRY-RUN: skipping pending-approval polling.
+2026-06-16 02:39:14,566 hermes INFO Weekly trades: 43
+2026-06-16 02:39:15,269 hermes INFO Fetched market news section (1377 chars).
+2026-06-16 02:39:15,269 hermes INFO Top conditions: ['VIX 18-22: WR=68%, n=19, avg_pnl=$-0.68', 'Thursday: WR=44%, n=9, avg_pnl=$19.78', 'Friday: WR=41%, n=27, avg_pnl=$15.78']
+2026-06-16 02:39:15,269 hermes INFO Generated 5 hypotheses.
+2026-06-16 02:39:15,269 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H1_vix_filtered_20260616.py
+2026-06-16 02:39:15,269 hermes INFO Running backtest: H1_vix_filtered_20260616.py
+2026-06-16 02:39:16,379 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H2_time_filtered_20260616.py
+2026-06-16 02:39:16,379 hermes INFO Running backtest: H2_time_filtered_20260616.py
+2026-06-16 02:39:16,801 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H3_dow_focused_20260616.py
+2026-06-16 02:39:16,801 hermes INFO Running backtest: H3_dow_focused_20260616.py
+2026-06-16 02:39:17,254 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H4_combined_20260616.py
+2026-06-16 02:39:17,255 hermes INFO Running backtest: H4_combined_20260616.py
+2026-06-16 02:39:17,697 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H5_momentum_variant_20260616.py
+2026-06-16 02:39:17,697 hermes INFO Running backtest: H5_momentum_variant_20260616.py
+2026-06-16 02:39:18,135 hermes INFO KILLED H1_vix_filtered_20260616 — max DD 193% > 35%
+2026-06-16 02:39:18,135 hermes INFO KILLED H3_dow_focused_20260616 — max DD 204% > 35%
+2026-06-16 02:39:18,135 hermes INFO KILLED H4_combined_20260616 — PF 0.68 < 1.40
+2026-06-16 02:39:18,135 hermes INFO KILLED H5_momentum_variant_20260616 — OOS WR 2% < 55%
+2026-06-16 02:39:18,135 hermes INFO Survivors: 1 / 5
+2026-06-16 02:39:18,136 hermes INFO Saved survivor: H2_time_filtered_20260616 (confidence=100)
+2026-06-16 02:39:18,136 hermes INFO DRY-RUN: skipping approval requests for 1 survivor(s).
+2026-06-16 02:39:18,137 hermes INFO ═══ Hermes Researcher complete — 2026-06-16T02:39:18.137748 ═══
+2026-06-16 02:42:39,442 hermes INFO ═══ Hermes Researcher starting — 2026-06-16T02:42:39.442845 ═══
+2026-06-16 02:42:39,443 hermes INFO DRY-RUN: skipping pending-approval polling.
+2026-06-16 02:42:39,443 hermes INFO Weekly trades: 43
+2026-06-16 02:42:40,686 hermes INFO Fetched market news section (1377 chars).
+2026-06-16 02:42:40,686 hermes INFO Top conditions: ['VIX 18-22: WR=68%, n=19, avg_pnl=$-0.68', 'Thursday: WR=44%, n=9, avg_pnl=$19.78', 'Friday: WR=41%, n=27, avg_pnl=$15.78']
+2026-06-16 02:42:40,686 hermes INFO Generated 5 hypotheses.
+2026-06-16 02:42:40,686 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H1_vix_filtered_20260616.py
+2026-06-16 02:42:40,686 hermes INFO Running backtest: H1_vix_filtered_20260616.py
+2026-06-16 02:42:41,127 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H2_time_filtered_20260616.py
+2026-06-16 02:42:41,127 hermes INFO Running backtest: H2_time_filtered_20260616.py
+2026-06-16 02:42:41,563 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H3_dow_focused_20260616.py
+2026-06-16 02:42:41,563 hermes INFO Running backtest: H3_dow_focused_20260616.py
+2026-06-16 02:42:41,997 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H4_combined_20260616.py
+2026-06-16 02:42:41,997 hermes INFO Running backtest: H4_combined_20260616.py
+2026-06-16 02:42:42,439 hermes INFO Wrote backtest script: /root/hermes_system/backtest_scripts/H5_momentum_variant_20260616.py
+2026-06-16 02:42:42,439 hermes INFO Running backtest: H5_momentum_variant_20260616.py
+2026-06-16 02:42:42,869 hermes INFO KILLED H1_vix_filtered_20260616 — max DD 193% > 35%
+2026-06-16 02:42:42,869 hermes INFO KILLED H3_dow_focused_20260616 — max DD 204% > 35%
+2026-06-16 02:42:42,870 hermes INFO KILLED H4_combined_20260616 — PF 0.68 < 1.40
+2026-06-16 02:42:42,870 hermes INFO KILLED H5_momentum_variant_20260616 — OOS WR 2% < 55%
+2026-06-16 02:42:42,870 hermes INFO Survivors: 1 / 5
+2026-06-16 02:42:42,870 hermes INFO Saved survivor: H2_time_filtered_20260616 (confidence=100)
+2026-06-16 02:42:42,870 hermes INFO DRY-RUN: skipping approval requests for 1 survivor(s).
+2026-06-16 02:42:42,872 hermes INFO ═══ Hermes Researcher complete — 2026-06-16T02:42:42.872273 ═══

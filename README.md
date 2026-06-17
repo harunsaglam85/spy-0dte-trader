@@ -13,9 +13,9 @@
 
 ---
 
-![Strategy Win Rates](Screenshot%202026-06-17%20183456.png)
+![Strategy Win Rates](docs/images/strategy_winrates.png)
 
-![VIX Regime Analysis](Screenshot%202026-06-17%20183507.png)
+![VIX Regime Analysis](docs/images/vix_regime.png)
 
 ## Live System
 
