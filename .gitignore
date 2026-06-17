@@ -18,3 +18,4 @@ hermes_research_round2.py
 hermes_r3.py
 "e, port=25503)"
 logs/
+trading.db
