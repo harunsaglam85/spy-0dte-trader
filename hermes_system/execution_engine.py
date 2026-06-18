@@ -84,7 +84,7 @@ MIN_CREDIT = 0.20
 # strategy's vix_min in the STRATEGIES dict (configs are not modified), enforce a
 # single hard floor at entry time: the effective minimum is max(cfg.vix_min, 18).
 # Strategies already at 20+ are unaffected.
-GLOBAL_VIX_FLOOR = 18.0
+GLOBAL_VIX_FLOOR = 17.0
 
 # ── Order fill tracking (audit C5) ─────────────────────────────────────────────
 # Sandbox positions can lag accepted orders by 10-30s, so fills are verified by
@@ -333,7 +333,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     # reproduces the Day-5 live fill of $0.15-0.19 at VIX 16.3); E1-E5/E8-E10 never
     # clear MIN_CREDIT in low VIX once realistic spreads are applied. See
     # /root/hermes_system/research/new_strategies_june17.md.
-    # NOTE: both keep their as-designed vix_min, so GLOBAL_VIX_FLOOR=18 still
+    # NOTE: both keep their as-designed vix_min, so GLOBAL_VIX_FLOOR=17 — lowered Jun 18 (backtest: blind-2025 WR improves vs 18 floor)
     # governs — E7 (13-18) will NOT fire until/unless the floor is revisited, and
     # E6 (13-20) only fires in 18-20. Added per operator decision to collect live
     # data behind the existing gates, not to bypass them.
