@@ -351,6 +351,22 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=3.0,
     ),
+    # ── E8 (afternoon strangle, D1 candidate) — 1 contract ──────────────────────
+    # 5yr OOS validated on real ThetaData quotes (see research/d1_strangle_backtest.md).
+    # PROTECTED variant ($5 wings): short OTM put + long put -$5, short OTM call +
+    # long call +$5 — this is structurally an iron_condor, which is how the engine
+    # builds it (spread_width=5.0). The naked variant was rejected for unbounded
+    # tail risk. Protected blind-2025 WR 64.9% (full-sample 66.7%), PF 1.47,
+    # max single loss $-232. Contango gate (VIX3M/VIX>=1.05) is applied globally in
+    # _check_entries, so no per-strategy flag is needed. As with E6/E7 the global
+    # VIX floor (17) governs, so despite vix_min=13 this only fires at VIX 17-22.
+    'E8_afternoon_strangle': StrategyConfig(
+        name='E8_afternoon_strangle', entry_days=frozenset({0, 1, 2, 3, 4}),
+        entry_start=(14, 0), entry_end=(15, 0),
+        spread_type='iron_condor', vix_min=13.0, vix_max=22.0, delta_target=0.30,
+        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        contracts=1, spread_width=5.0,
+    ),
 }
 
 
