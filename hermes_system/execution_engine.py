@@ -1,9 +1,11 @@
 #!/usr/bin/env python3
 """
-Hermes Execution Engine — Autonomous 19-strategy paper trading engine.
-8 confirmed strategies (3 contracts each) + 12 experimental T-strategies (1 contract each).
-Runs all strategies simultaneously via Tradier sandbox.
-Cron: 45 9 * * 1-5  (9:45 AM ET, Mon-Fri)
+Hermes Execution Engine — Autonomous multi-strategy LIVE trading engine.
+PHASE 1 LIVE (go-live June 22 2026): $1,000 real-money capital, 1 contract per
+strategy, $150 daily loss limit. Order submission, balances, positions and fills
+run against the Tradier PRODUCTION API (account 6YB83257). Spread entries are
+submitted as single multileg combo orders so a partial fill can never leave a
+naked leg. Supervised by systemd (hermes-engine.service).
 """
 import sys
 sys.path.insert(0, '/root/spy-0dte-trader')
@@ -63,15 +65,18 @@ logging.basicConfig(
 )
 log = logging.getLogger('hermes.execution')
 
-# ── Tradier sandbox ────────────────────────────────────────────────────────────
-SANDBOX_BASE    = 'https://sandbox.tradier.com/v1'
-SANDBOX_KEY     = os.getenv('TRADIER_SANDBOX_KEY', '')
-SANDBOX_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
+# ── Tradier PRODUCTION (LIVE real-money account) ────────────────────────────────
+# GO-LIVE June 22 2026: order submission, balances, positions and fills all run
+# against the live api.tradier.com endpoint and the real account. The quotes/data
+# feed in core.data_feeds already uses api.tradier.com and is unchanged.
+PROD_BASE    = 'https://api.tradier.com/v1'
+PROD_KEY     = os.getenv('TRADIER_API_KEY', '')
+PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
 
 # ── Risk ───────────────────────────────────────────────────────────────────────
-# Confirmed (3 contracts): max loss $600/day. Experimental (1 contract): $200/day.
+# PHASE 1 LIVE ($1,000 capital): 1 contract per strategy, max loss $200/contract.
 MAX_LOSS_PER_CONTRACT = 200.0
-MAX_DAILY_LOSS        = 8_000.0   # total paper money daily stop — halts ALL strategies
+MAX_DAILY_LOSS        = 150.0     # LIVE daily stop — halts ALL new entries for the day
 
 # ── Credit gate (BUG 4) ────────────────────────────────────────────────────────
 # Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
@@ -208,27 +213,28 @@ class Position:
 # ── Strategy definitions ───────────────────────────────────────────────────────
 
 STRATEGIES: Dict[str, StrategyConfig] = {
-    # ── Confirmed strategies — 3 contracts each ($600/day max loss) ────────────
+    # PHASE 1 LIVE: 1 contract per strategy — scale up after 2 weeks validation
+    # ── Confirmed strategies ────────────────────────────────────────────────────
     'R3A': StrategyConfig(
         name='R3A', entry_days=frozenset({0}),
         entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=4, spread_width=2.0,
+        contracts=1, spread_width=2.0,
     ),
     'R3B': StrategyConfig(
         name='R3B', entry_days=frozenset({2}),
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=3, spread_width=2.0,
+        contracts=1, spread_width=2.0,
     ),
     'R3D': StrategyConfig(
         name='R3D', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=3, spread_width=2.0,
+        contracts=1, spread_width=2.0,
         extra={},
     ),
     'R3E': StrategyConfig(
@@ -243,7 +249,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(13, 0), entry_end=(13, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.70, stop_multiple=1.8, force_exit_time=(15, 30),
-        contracts=3, spread_width=2.0,
+        contracts=1, spread_width=2.0,
         extra={'require_spy_above_vwap': True},
     ),
     'R10': StrategyConfig(
@@ -251,7 +257,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         entry_start=(10, 30), entry_end=(11, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
-        contracts=5, spread_width=2.0,
+        contracts=1, spread_width=2.0,
         extra={'require_spy_above_ma50_and_vwap': True},
     ),
     'S4': StrategyConfig(
@@ -433,6 +439,11 @@ class HermesEngine:
         self.entered:       Dict[str, bool] = {}
         self.entered_today: set = set()
         self._sweep_done: bool = False
+        # Item 2: page Telegram exactly once when the $150 daily loss limit trips.
+        self._daily_limit_alerted: bool = False
+        # Item 6: pre-flight gate. Entries are blocked until pre-flight passes; a
+        # failure pauses entries (positions still monitored/exited) without crashing.
+        self.preflight_ok: bool = False
         # FIX 3: last time a rollback Telegram alert was sent, per strategy.
         self.last_rollback_alert: Dict[str, float] = {}
         # FIX 1: retry-loop backoff. order_blacklist maps an option symbol to the
@@ -441,7 +452,7 @@ class HermesEngine:
         self.order_blacklist: Dict[str, datetime] = {}
         self.reject_history:  Dict[str, List[datetime]] = {}
         self._sb_hdrs    = {
-            'Authorization': f'Bearer {SANDBOX_KEY}',
+            'Authorization': f'Bearer {PROD_KEY}',
             'Accept':        'application/json',
         }
         self._contango_today:      Optional[bool] = None
@@ -467,8 +478,14 @@ class HermesEngine:
         # knowledge base also lists R3C, T5, and T6, which exist there but are
         # NOT implemented in STRATEGIES — reconcile before deploying them.
         n = len(STRATEGIES)
-        log.info('Hermes Engine starting — %d strategies active.', n)
-        tg_send(f'🚀 Hermes Engine started — {n} strategies active.')
+        log.info('LIVE MODE — production account %s', PROD_ACCOUNT or '(unset)')
+        log.info('Hermes Engine starting — %d strategies active. Daily loss limit $%.0f, 1 contract/strategy.',
+                 n, MAX_DAILY_LOSS)
+        tg_send(f'🚀 Hermes Engine started — LIVE account {PROD_ACCOUNT} — {n} strategies, '
+                f'$150 daily loss limit, 1 contract each.')
+        # Item 6: pre-flight before any trading. A failure pauses entries (sets
+        # preflight_ok=False) but does not stop the loop, so exits keep running.
+        self._preflight()
         try:
             self._run_loop()
         except Exception as exc:
@@ -494,6 +511,8 @@ class HermesEngine:
             # stretched the "60-second" risk loop to 2-5 minutes under load.
             quotes = self.feeds.get_tradier_quotes(self._batch_quote_symbols())
             ms = self._get_market_state(now, quotes)
+            # Item 2: log current daily P&L against the limit every loop.
+            log.info('Daily P&L: $%.2f / limit -$%.2f', self.total_pnl, MAX_DAILY_LOSS)
             self._check_entries(ms, now)
             self._check_exits(ms, now, quotes)
             time.sleep(60)
@@ -655,13 +674,98 @@ class HermesEngine:
 
         return is_contango
 
+    # ── Pre-flight (Item 6) ───────────────────────────────────────────────────
+
+    def _account_balance(self) -> Optional[float]:
+        """Total account equity from the Tradier production /balances endpoint.
+        Returns None on any error so pre-flight treats it as a failed check."""
+        if not PROD_KEY or not PROD_ACCOUNT:
+            return None
+        try:
+            r = requests.get(f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/balances',
+                             headers=self._sb_hdrs, timeout=10)
+            if not r.ok:
+                log.warning('Balance fetch failed %d: %s', r.status_code, r.text[:100])
+                return None
+            b = r.json().get('balances') or {}
+            for key in ('total_equity', 'total_cash', 'option_buying_power'):
+                v = b.get(key)
+                if v is not None:
+                    return float(v)
+            log.warning('Balance response missing equity fields: %s', str(b)[:200])
+            return None
+        except Exception as exc:
+            log.warning('Balance fetch error: %s', exc)
+            return None
+
+    def _preflight(self) -> None:
+        """Item 6: verify the live trading stack before any entries are allowed.
+        Checks (1) production API auth, (2) account balance >= $500, (3) ThetaData
+        snapshot endpoint, (4) VIX feed. Any failure leaves preflight_ok False and
+        pages Telegram; it never raises, so the loop keeps running and open
+        positions are still monitored and exited."""
+        failures: List[str] = []
+
+        # 1. Production API connection / auth.
+        if PROD_KEY and PROD_ACCOUNT:
+            try:
+                r = requests.get(f'{PROD_BASE}/user/profile', headers=self._sb_hdrs, timeout=10)
+                if not r.ok:
+                    failures.append(f'API profile HTTP {r.status_code}')
+            except Exception as exc:
+                failures.append(f'API profile error: {exc}')
+        else:
+            failures.append('production API creds not set')
+
+        # 2. Account balance >= $500.
+        bal = self._account_balance()
+        if bal is None:
+            failures.append('balance unavailable')
+        elif bal < 500.0:
+            failures.append(f'balance ${bal:.2f} < $500 minimum')
+
+        # 3. ThetaData snapshot endpoint responding.
+        try:
+            r = requests.get('http://localhost:25503/v3/option/snapshot/quote?symbol=SPY', timeout=10)
+            if not r.ok:
+                failures.append(f'ThetaData HTTP {r.status_code}')
+        except Exception as exc:
+            failures.append(f'ThetaData error: {exc}')
+
+        # 4. VIX feed working.
+        try:
+            vix = self.feeds.get_vix()
+            if not vix or vix <= 0:
+                failures.append('VIX feed returned 0')
+        except Exception as exc:
+            failures.append(f'VIX feed error: {exc}')
+
+        if failures:
+            self.preflight_ok = False
+            reason = '; '.join(failures)
+            log.warning('⚠️ Pre-flight failed: %s — entries paused.', reason)
+            tg_send(f'⚠️ Pre-flight failed: {reason} — entries paused (positions still monitored).')
+        else:
+            self.preflight_ok = True
+            log.info('✅ Pre-flight passed — LIVE trading active (balance $%.2f).', bal)
+            tg_send(f'✅ Pre-flight passed — LIVE trading active. Balance ${bal:.2f}.')
+
     # ── Entry gate ────────────────────────────────────────────────────────────
 
     def _check_entries(self, ms: dict, now: datetime) -> None:
+        # Item 6: never enter while pre-flight is failing (API/balance/data/VIX).
+        if not self.preflight_ok:
+            log.warning('Pre-flight not passed — entries paused (positions still monitored).')
+            return
         if not self._check_term_structure():
             return
         if not self._total_loss_ok():
-            log.warning('Daily loss limit hit — skipping all entries.')
+            # Item 2: page Telegram once, then keep blocking entries for the day.
+            if not self._daily_limit_alerted:
+                tg_send(f'⛔ DAILY LOSS LIMIT HIT — no more entries today. P&L: ${self.total_pnl:.2f}')
+                self._daily_limit_alerted = True
+            log.warning('Daily loss limit hit (P&L $%.2f / limit -$%.2f) — skipping all entries.',
+                        self.total_pnl, MAX_DAILY_LOSS)
             return
         expiry = date.today().strftime('%Y-%m-%d')
         # R1: snapshot broker positions at most once per loop and share it
@@ -809,62 +913,48 @@ class HermesEngine:
         slippage_pct = 0.02
         fill         = round(credit * (1.0 - slippage_pct), 2)
 
-        submitted: List[Tuple[Leg, str]] = []
-        for leg in legs:
-            order_id = self._submit_order(leg.option_symbol, leg.side, cfg.contracts)
-            if order_id:
-                submitted.append((leg, order_id))
-            else:
+        # Item 5 (critical safety fix): submit BOTH legs — all four for an iron
+        # condor — as ONE Tradier multileg combo order (class=multileg, type=
+        # credit). The combo fills atomically or not at all, so a partial fill can
+        # never leave a naked short leg (the old leg-by-leg path could fill the
+        # sell and then have the buy rejected → unlimited downside). The limit is
+        # the conservative net credit from the chain (short bid − long ask), which
+        # is marketable, so a live order should fill quickly.
+        entry_order_id: Optional[str] = self._submit_multileg_order(
+            'SPY', legs, 'credit', credit, cfg.contracts)
+        if not entry_order_id:
+            # Combo rejected outright — nothing opened, no naked leg to roll back.
+            # Count the buy-side strike(s) for retry-loop backoff (FIX 1).
+            for leg in legs:
                 if leg.side == 'buy_to_open':
-                    self._record_buy_reject(leg.option_symbol, now)  # FIX 1
-                log.error('%s: order rejected for %s — rolling back %d submitted leg(s).',
-                          cfg.name, leg.option_symbol, len(submitted))
-                self._rollback_submitted(cfg.name, submitted, cfg.contracts)
-                return
+                    self._record_buy_reject(leg.option_symbol, now)
+            log.error('%s: multileg combo order rejected — no position opened.', cfg.name)
+            return
 
-        # C5: verify fills by polling each leg's own order ID — never by waiting
-        # a fixed delay and snapshotting positions, which lag accepted orders by
-        # 10-30s on sandbox and made real fills look missing (abandoning live
-        # positions while believing nothing was open).
-        if SANDBOX_KEY and SANDBOX_ACCOUNT:
-            states = self._await_orders([oid for _, oid in submitted])
-            filled:    List[Tuple[Leg, dict]] = []
-            unfilled:  List[Tuple[Leg, str]]  = []
-            for leg, oid in submitted:
-                st = states.get(oid, {})
-                if st.get('status') == 'filled':
-                    filled.append((leg, st))
-                else:
-                    unfilled.append((leg, st.get('status') or 'unknown'))
-            if unfilled:
-                # FIX 1: a buy_to_open that accepted but never filled is still a
-                # rejection for retry-loop accounting.
-                for leg, status in unfilled:
+        # C5: verify the fill by polling the combo order's own ID. Because the
+        # combo is atomic, a non-'filled' status means NOTHING opened — there is no
+        # naked leg to unwind; cancel if still working, record the backoff, skip.
+        if PROD_KEY and PROD_ACCOUNT:
+            st     = self._await_orders([entry_order_id]).get(entry_order_id, {})
+            status = st.get('status')
+            if status != 'filled':
+                if status not in ORDER_TERMINAL_STATUSES:
+                    if not self._cancel_order(entry_order_id):
+                        tg_send(f'🚨 HERMES {cfg.name}: combo order {entry_order_id} '
+                                f'uncancelable — may fill unattended, check manually!')
+                for leg in legs:
                     if leg.side == 'buy_to_open':
                         self._record_buy_reject(leg.option_symbol, now)
-                log.error('%s: fill verification failed — %s — rolling back %d filled leg(s).',
-                          cfg.name,
-                          [(l.option_symbol, status) for l, status in unfilled],
-                          len(filled))
-                # BUG2: cancel any order still working at timeout before walking
-                # away, then close every filled leg regardless of which side
-                # (sell or buy) was the one that failed.
-                for leg, oid in submitted:
-                    if states.get(oid, {}).get('status') not in ORDER_TERMINAL_STATUSES:
-                        if not self._cancel_order(oid):
-                            tg_send(f'🚨 HERMES {cfg.name}: order {oid} ({leg.option_symbol}) '
-                                    f'uncancelable during rollback — may fill unattended, check manually!')
-                self._rollback_legs(cfg.name, [l for l, _ in filled], cfg.contracts)
+                log.error('%s: multileg combo order %s not filled (status=%s) — no position opened.',
+                          cfg.name, entry_order_id, status)
                 return
-            # C5: record the broker's actual per-leg fill prices and replace the
-            # modeled 2%-slippage credit with the real net credit when every leg
-            # reports one — recorded P&L should be broker truth, not model-on-model.
-            reported = 0
-            for leg, st in filled:
-                try:
-                    px = float(st.get('avg_fill_price') or 0.0)
-                except (TypeError, ValueError):
-                    px = 0.0
+            # C5: record the broker's actual per-leg fills and replace the modeled
+            # 2%-slippage credit with the real net credit when every leg reports a
+            # price — recorded P&L should be broker truth, not model-on-model.
+            leg_fills = self._extract_leg_fills(st)
+            reported  = 0
+            for leg in legs:
+                px = leg_fills.get(leg.option_symbol, 0.0)
                 if px > 0:
                     leg.fill_price = px
                     reported += 1
@@ -875,7 +965,7 @@ class HermesEngine:
                 if actual_credit > 0:
                     fill         = actual_credit
                     slippage_pct = (1.0 - fill / theoretical) if theoretical > 0 else 0.0
-                    log.info('%s: actual fills recorded — net credit $%.2f (modeled $%.2f).',
+                    log.info('%s: actual combo fills recorded — net credit $%.2f (modeled $%.2f).',
                              cfg.name, fill, round(theoretical * 0.98, 2))
                 else:
                     log.critical('%s: actual net credit $%.2f is non-positive — keeping modeled '
@@ -887,8 +977,8 @@ class HermesEngine:
                 log.warning('%s: avg_fill_price missing for %d/%d legs — keeping modeled credit $%.2f.',
                             cfg.name, len(legs) - reported, len(legs), fill)
 
-        # FIX 1: every leg is confirmed filled here — reset the rejection counter
-        # for each buy_to_open strike so a future bad streak starts clean.
+        # FIX 1: combo is confirmed filled here — reset the rejection counter for
+        # each buy_to_open strike so a future bad streak starts clean.
         for leg in legs:
             if leg.side == 'buy_to_open':
                 self._clear_buy_reject(leg.option_symbol)
@@ -921,6 +1011,7 @@ class HermesEngine:
                 'spy_vs_ma50':       round(ms['spy'] - ms['ma50'], 2) if ms.get('ma50') else None,
                 'vix_direction':     ms['vix_direction'],
                 'market_regime':     ms['market_regime'],
+                'entry_order_id':    entry_order_id,  # Item 7: production order ID
             },
         )
         self.positions.append(pos)
@@ -936,10 +1027,14 @@ class HermesEngine:
         # positions.json reconciliation drops the position (e.g. already expired).
         self._save_positions()
         self._log_trade({
-            'strategy':   cfg.name,
-            'status':     'open',
-            'entry_time': str(now),
-            'legs':       [l.option_symbol for l in legs],
+            'strategy':        cfg.name,
+            'status':          'open',
+            'mode':            'LIVE',                # Item 7
+            'account':         PROD_ACCOUNT,         # Item 7
+            'entry_time':      str(now),
+            'legs':            [l.option_symbol for l in legs],
+            'order_id':        entry_order_id,       # Item 7: production order ID
+            'real_fill_price': fill,                 # Item 7: actual net credit fill
         })
         log.info('Entered %s: %dc credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, cfg.contracts, fill, profit_thresh, stop_thresh)
         tg_send(
@@ -1212,7 +1307,7 @@ class HermesEngine:
         # filled — not a fixed sleep + positions diff, which both raced the
         # sandbox's 10-30s position lag and was ambiguous for strikes shared
         # with another strategy.
-        if SANDBOX_KEY and SANDBOX_ACCOUNT:
+        if PROD_KEY and PROD_ACCOUNT:
             states = self._await_orders([oid for _, oid in close_orders])
             unconfirmed = [
                 (leg.option_symbol, states.get(oid, {}).get('status') or 'unknown')
@@ -1272,9 +1367,14 @@ class HermesEngine:
             # status=='closed') saw 0 closed trades and misreported P&L. exit_reason,
             # pnl, exit_time and hold_minutes below complete the spec'd close record.
             'status':                    'closed',
+            'mode':                      'LIVE',                                    # Item 7
+            'account':                   PROD_ACCOUNT,                              # Item 7
+            'entry_order_id':            pos.entry_state.get('entry_order_id'),     # Item 7
+            'close_order_ids':           [oid for _, oid in close_orders],          # Item 7
             'contracts':                 pos.contracts,
             'entry_time':                pos.entry_time.isoformat(),
             'entry_price':               pos.entry_credit,
+            'real_fill_price':           exit_val,                                  # Item 7: actual close fill
             'theoretical_mid':           pos.entry_state.get('theoretical_mid'),
             'fill_slippage_pct':         pos.entry_state.get('fill_slippage_pct'),
             'vix_entry':                 pos.entry_state.get('vix'),
@@ -1290,6 +1390,7 @@ class HermesEngine:
             'exit_price':                exit_val,
             'exit_reason':               reason,
             'pnl':                       pnl,
+            'real_pnl':                  pnl,   # Item 7: P&L from real broker fills
             'realized_pnl_per_contract': pnl_per_contract,
             'total_realized_pnl':        round(self.daily_pnl[pos.strategy], 2),
             'hold_minutes':              hold_min,
@@ -1311,7 +1412,7 @@ class HermesEngine:
             return True
         try:
             r = requests.delete(
-                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/orders/{order_id}',
+                f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/orders/{order_id}',
                 headers=self._sb_hdrs,
                 timeout=10,
             )
@@ -1372,7 +1473,7 @@ class HermesEngine:
                     f'🚨 HERMES ROLLBACK FAILED: {strategy} {leg.option_symbol} '
                     f'naked leg open — manual close required!'
                 )
-        if closes and SANDBOX_KEY and SANDBOX_ACCOUNT:
+        if closes and PROD_KEY and PROD_ACCOUNT:
             states = self._await_orders([oid for _, oid in closes])
             for leg, oid in closes:
                 status = states.get(oid, {}).get('status')
@@ -1399,8 +1500,8 @@ class HermesEngine:
         """Submit a market order. Returns the Tradier order ID on acceptance
         (SIM_ORDER_ID when running without sandbox creds), None on rejection.
         Acceptance is NOT a fill — callers must verify via _await_orders (C5)."""
-        if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
-            log.info('Sandbox creds not set — simulating %s %s.', side, option_symbol)
+        if not PROD_KEY or not PROD_ACCOUNT:
+            log.info('Tradier creds not set — simulating %s %s.', side, option_symbol)
             return SIM_ORDER_ID
         try:
             underlying = parse_occ(option_symbol)[0]
@@ -1418,7 +1519,7 @@ class HermesEngine:
         }
         try:
             r = requests.post(
-                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/orders',
+                f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/orders',
                 data=data,
                 headers=self._sb_hdrs,
                 timeout=10,
@@ -1426,15 +1527,83 @@ class HermesEngine:
             if r.ok:
                 order_id = (r.json().get('order') or {}).get('id')
                 if order_id is None:
-                    log.error('Sandbox order accepted but no order ID in response: %s', r.text[:200])
+                    log.error('Tradier order accepted but no order ID in response: %s', r.text[:200])
                     return None
-                log.info('Sandbox order accepted: %s %s (order_id=%s)', side, option_symbol, order_id)
+                log.info('Tradier order accepted: %s %s (order_id=%s)', side, option_symbol, order_id)
                 return str(order_id)
-            log.error('Sandbox order failed %d: %s', r.status_code, r.text[:200])
+            log.error('Tradier order failed %d: %s', r.status_code, r.text[:200])
             return None
         except Exception as exc:
-            log.error('Sandbox order error: %s', exc)
+            log.error('Tradier order error: %s', exc)
             return None
+
+    def _submit_multileg_order(self, underlying: str, legs: List[Leg],
+                               order_type: str, price: float, qty: int) -> Optional[str]:
+        """Item 5: submit all legs of a spread as ONE Tradier multileg combo order
+        (class=multileg). The combo fills atomically or not at all, so a partial
+        fill can never leave a naked short leg. *order_type* is 'credit' for the
+        credit spreads this engine trades; *price* is the net-credit limit (the
+        minimum credit to accept). Returns the order ID on acceptance (SIM_ORDER_ID
+        without creds), None on rejection. Acceptance is NOT a fill — callers must
+        verify via _await_orders, exactly like _submit_order."""
+        if not PROD_KEY or not PROD_ACCOUNT:
+            log.info('Tradier creds not set — simulating multileg %s order (%d legs).',
+                     order_type, len(legs))
+            return SIM_ORDER_ID
+        data = {
+            'class':    'multileg',
+            'symbol':   underlying,
+            'type':     order_type,
+            'duration': 'day',
+            'price':    f'{abs(price):.2f}',
+        }
+        for i, leg in enumerate(legs):
+            data[f'option_symbol[{i}]'] = leg.option_symbol
+            data[f'side[{i}]']          = leg.side
+            data[f'quantity[{i}]']      = str(qty)
+        try:
+            r = requests.post(
+                f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/orders',
+                data=data,
+                headers=self._sb_hdrs,
+                timeout=10,
+            )
+            if r.ok:
+                order_id = (r.json().get('order') or {}).get('id')
+                if order_id is None:
+                    log.error('Tradier multileg order accepted but no order ID: %s', r.text[:200])
+                    return None
+                log.info('Tradier multileg %s order accepted: %s @ %s (order_id=%s) legs=%s',
+                         order_type, underlying, data['price'], order_id,
+                         [(l.side, l.option_symbol) for l in legs])
+                return str(order_id)
+            log.error('Tradier multileg order failed %d: %s', r.status_code, r.text[:300])
+            return None
+        except Exception as exc:
+            log.error('Tradier multileg order error: %s', exc)
+            return None
+
+    @staticmethod
+    def _extract_leg_fills(order: dict) -> Dict[str, float]:
+        """Map option_symbol → avg_fill_price for each leg of a (multileg) order
+        status dict. Tradier nests the per-leg fills under order['leg']. Legs with
+        a missing or unparseable price are omitted, so callers can detect an
+        incomplete fill report by comparing len(result) to the leg count."""
+        fills: Dict[str, float] = {}
+        legs = order.get('leg')
+        if isinstance(legs, dict):
+            legs = [legs]
+        if not isinstance(legs, list):
+            return fills
+        for lg in legs:
+            sym = lg.get('option_symbol') or lg.get('symbol')
+            try:
+                px = float(lg.get('avg_fill_price') or 0.0)
+            except (TypeError, ValueError):
+                px = 0.0
+            if sym and px > 0:
+                fills[sym] = px
+        return fills
 
     def _get_order(self, order_id: str) -> dict:
         """Fetch one order's current state from Tradier. Returns {} on any
@@ -1443,7 +1612,7 @@ class HermesEngine:
             return {'status': 'filled', 'avg_fill_price': 0.0}
         try:
             r = requests.get(
-                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/orders/{order_id}',
+                f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/orders/{order_id}',
                 headers=self._sb_hdrs,
                 timeout=10,
             )
@@ -1480,11 +1649,11 @@ class HermesEngine:
 
     def _fetch_tradier_positions_full(self) -> Dict[str, int]:
         """Returns {symbol: quantity} for all open Tradier positions."""
-        if not SANDBOX_KEY or not SANDBOX_ACCOUNT:
+        if not PROD_KEY or not PROD_ACCOUNT:
             return {}
         try:
             r = requests.get(
-                f'{SANDBOX_BASE}/accounts/{SANDBOX_ACCOUNT}/positions',
+                f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/positions',
                 headers=self._sb_hdrs,
                 timeout=10,
             )
@@ -1607,7 +1776,7 @@ class HermesEngine:
             try:
                 saved = json.loads(POSITIONS_FILE.read_text() or '[]')
                 if saved:
-                    if SANDBOX_KEY and SANDBOX_ACCOUNT:
+                    if PROD_KEY and PROD_ACCOUNT:
                         tradier_syms = self._fetch_tradier_positions()
                         reconciled: List[Position] = []
                         for d in saved:
@@ -1669,6 +1838,18 @@ class HermesEngine:
     # ── Helpers ───────────────────────────────────────────────────────────────
 
     def _log_trade(self, trade: dict) -> None:
+        # Item 7: guarantee EVERY trade record — entry stub or close — carries the
+        # live-trading provenance fields, regardless of which call site built it.
+        # The entry and close paths already set these explicitly; setdefault only
+        # backfills a field a caller left out, so no record is ever written
+        # without them. mode/account are constant for the live account; order_id
+        # falls back to the entry combo's order ID (so close records, which carry
+        # entry_order_id/close_order_ids, still expose a top-level order_id); the
+        # real fill price is left null when a caller hasn't recorded one.
+        trade.setdefault('mode', 'LIVE')
+        trade.setdefault('account', os.getenv('TRADIER_ACCOUNT_ID'))
+        trade.setdefault('order_id', trade.get('entry_order_id'))
+        trade.setdefault('real_fill_price', None)
         path   = TRADES_DIR / f'{date.today().isoformat()}.json'
         trades = json.loads(path.read_text()) if path.exists() else []
         trades.append(trade)
@@ -1681,9 +1862,12 @@ class HermesEngine:
         self.entered         = {}
         self.entered_today   = set()
         self._sweep_done          = False
+        self._daily_limit_alerted = False
         self._contango_today      = None
         self._contango_checked_at = 0.0
         log.info('Daily reset: %s', self.today)
+        # Item 6: re-run pre-flight at the start of each new trading day.
+        self._preflight()
 
     def _strategy_already_open(self, name: str, open_syms: set) -> bool:
         """Check a shared snapshot of live Tradier positions (fetched once per
