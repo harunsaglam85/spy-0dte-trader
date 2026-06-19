@@ -84,7 +84,7 @@ MIN_CREDIT = 0.20
 # strategy's vix_min in the STRATEGIES dict (configs are not modified), enforce a
 # single hard floor at entry time: the effective minimum is max(cfg.vix_min, 18).
 # Strategies already at 20+ are unaffected.
-GLOBAL_VIX_FLOOR = 17.0
+GLOBAL_VIX_FLOOR = 15.0
 
 # ── Order fill tracking (audit C5) ─────────────────────────────────────────────
 # Sandbox positions can lag accepted orders by 10-30s, so fills are verified by
