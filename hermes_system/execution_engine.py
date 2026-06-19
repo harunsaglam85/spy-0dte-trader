@@ -135,6 +135,26 @@ FOMC_DATES: frozenset = frozenset({
     date(2026, 12, 14), date(2026, 12, 15), date(2026, 12, 16),
 })
 
+# 2026 NYSE full-day market holidays — the engine idles, no polling.
+MARKET_HOLIDAYS_2026: frozenset = frozenset({
+    date(2026, 1, 1),   # New Year's Day
+    date(2026, 1, 19),  # MLK Day
+    date(2026, 2, 16),  # Presidents Day
+    date(2026, 4, 3),   # Good Friday
+    date(2026, 5, 25),  # Memorial Day
+    date(2026, 6, 19),  # Juneteenth
+    date(2026, 7, 3),   # Independence Day observed
+    date(2026, 9, 7),   # Labor Day
+    date(2026, 11, 26), # Thanksgiving
+    date(2026, 12, 25), # Christmas
+})
+
+# 2026 NYSE early closes — market closes 1PM ET instead of 4PM ET.
+EARLY_CLOSE_2026: frozenset = frozenset({
+    date(2026, 11, 27), # Day after Thanksgiving — closes 1PM ET
+    date(2026, 12, 24), # Christmas Eve — closes 1PM ET
+})
+
 S4_UNIVERSE = ['NVDA', 'TSLA', 'AMD', 'AAPL', 'MSFT', 'META', 'GOOGL', 'AMZN']
 
 
@@ -1696,7 +1716,12 @@ class HermesEngine:
         return self.total_pnl > -MAX_DAILY_LOSS
 
     def _is_market_hours(self, now: datetime) -> bool:
-        return (9, 30) <= (now.hour, now.minute) <= (16, 0) and now.weekday() < 5
+        today = now.date()
+        if today in MARKET_HOLIDAYS_2026:
+            log.info('Market holiday — engine idle')
+            return False
+        close = (13, 0) if today in EARLY_CLOSE_2026 else (16, 0)
+        return (9, 30) <= (now.hour, now.minute) <= close and now.weekday() < 5
 
     def _days_to_fomc(self, today: date) -> int:
         future = sorted(d for d in FOMC_DATES if d >= today)
