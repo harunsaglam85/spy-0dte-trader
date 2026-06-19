@@ -497,7 +497,10 @@ class DataFeeds:
                 'symbol': 'SPY', 'interval': '5min',
                 'start': start_str, 'end': end_str, 'session_filter': 'open'
             })
-            bars = data.get('series', {}).get('data', [])
+            if not data or not isinstance(data, dict):
+                self.logger.warning('get_spy_vwap: timesales returned None — using SPY spot as proxy')
+                return self.get_spy_price()
+            bars = (data.get('series') or {}).get('data') or []
             if not bars:
                 self.logger.warning('get_spy_vwap: no timesales bars — returning 0.0')
                 return 0.0
