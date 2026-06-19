@@ -27,7 +27,7 @@ INSIGHTS_DIR   = HERMES_ROOT / 'insights'
 INSIGHTS_DIR.mkdir(parents=True, exist_ok=True)
 
 OPENROUTER_KEY = os.getenv('OPENROUTER_API_KEY', '')
-MODEL          = 'anthropic/claude-sonnet-4-6'
+MODEL          = 'anthropic/claude-haiku-4-5'
 MAX_TOKENS     = 550    # tight cap — keeps total well under 3k tokens
 
 SYSTEM_PROMPT = (
