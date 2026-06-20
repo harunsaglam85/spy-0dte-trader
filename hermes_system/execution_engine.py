@@ -28,6 +28,26 @@ import requests
 import yfinance as yf
 from dotenv import load_dotenv
 
+# Batch 2 (Task 4): TA-Lib powers the advisory RSI filter. Import is guarded so a
+# missing/broken TA-Lib never stops the engine — the RSI filter just no-ops.
+try:
+    import talib
+    TA_LIB_AVAILABLE = True
+except Exception:  # pragma: no cover - import-environment dependent
+    talib = None
+    TA_LIB_AVAILABLE = False
+
+# Batch 2 (Task 5): SQLite mirror of the trade log. Runs ALONGSIDE the existing
+# trades/YYYY-MM-DD.json writes — never replaces them. Guarded + all calls
+# best-effort so a DB problem can never break trading.
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+try:
+    import db_manager
+    DB_AVAILABLE = True
+except Exception:  # pragma: no cover
+    db_manager = None
+    DB_AVAILABLE = False
+
 from core.data_feeds import DataFeeds
 from core.telegram_alerts import send as tg_send
 
@@ -119,6 +139,16 @@ ET = pytz.timezone('America/New_York')
 
 CONTANGO_THRESHOLD = 1.05
 VIX3M_CBOE_URL     = 'https://cdn.cboe.com/api/global/us_indices/daily_prices/VIX3M_History.csv'
+
+# ── Advisory entry filters (Batch 2, Task 4) ────────────────────────────────────
+# Two overbought/extension guards on put_spread entries only (iron condors and
+# strangles are unaffected — their call side benefits from a pullback). Each is
+# ADVISORY: a single trigger only logs a WARNING. They HARD-BLOCK put_spread
+# entries only when BOTH fire in the same loop (overbought AND stretched above
+# VWAP) — the combination that historically precedes a sharp mean-reversion.
+RSI_OVERBOUGHT       = 75.0   # 14-period daily RSI above this = overbought
+RSI_PERIOD           = 14
+VWAP_EXTENDED_PCT    = 1.5    # SPY more than this % above VWAP = extended
 
 # ── FOMC meeting dates 2025-2026 ───────────────────────────────────────────────
 FOMC_DATES: frozenset = frozenset({
@@ -464,6 +494,11 @@ class HermesEngine:
         # Options chain cache: (symbol, expiry) → (DataFrame, fetched_at monotonic)
         self._chain_cache: Dict[Tuple[str, str], Tuple[pd.DataFrame, float]] = {}
         self._chain_cache_ttl: float = 120.0  # 2 minutes
+        # Batch 2 (Task 4): SPY 14-period daily RSI, computed once per day at the
+        # first entry check (~9:30) and reused all day — the daily close it is
+        # built from cannot change intraday, so there is no value in recomputing.
+        self._rsi_today:      Optional[float] = None
+        self._rsi_date:       Optional[date]  = None
         self._load_positions()
 
     # ── Main loop ─────────────────────────────────────────────────────────────
@@ -603,6 +638,35 @@ class HermesEngine:
             return float(df['close'].iloc[-50:].mean())
         except Exception:
             return 0.0
+
+    def _get_spy_rsi(self) -> Optional[float]:
+        """SPY 14-period daily RSI, cached for the day (Task 4). Computed once on
+        the first call of a new day from yfinance daily closes via TA-Lib; reused
+        all day thereafter. Returns None if TA-Lib is unavailable or the data/
+        calculation fails, in which case the RSI filter is simply skipped."""
+        today = datetime.now(ET).date()
+        if self._rsi_date == today and self._rsi_today is not None:
+            return self._rsi_today
+        if not TA_LIB_AVAILABLE:
+            return None
+        try:
+            # Need RSI_PERIOD+1 closes minimum; pull extra for a stable warmup.
+            hist = yf.Ticker('SPY').history(period='3mo')
+            closes = hist['Close'].dropna().to_numpy(dtype='float64')
+            if closes.size < RSI_PERIOD + 1:
+                log.warning('RSI: only %d SPY closes — need %d, skipping RSI filter today.',
+                            closes.size, RSI_PERIOD + 1)
+                return None
+            rsi = float(talib.RSI(closes, timeperiod=RSI_PERIOD)[-1])
+            if rsi != rsi:  # NaN guard
+                return None
+            self._rsi_today = round(rsi, 2)
+            self._rsi_date  = today
+            log.info('SPY 14-period daily RSI = %.2f (cached for %s).', self._rsi_today, today)
+            return self._rsi_today
+        except Exception as exc:
+            log.warning('RSI computation failed: %s — skipping RSI filter today.', exc)
+            return None
 
     def _regime(self, vix: float) -> str:
         if vix < 15:  return 'low_vol'
@@ -767,6 +831,12 @@ class HermesEngine:
             log.warning('Daily loss limit hit (P&L $%.2f / limit -$%.2f) — skipping all entries.',
                         self.total_pnl, MAX_DAILY_LOSS)
             return
+        # ── Advisory filters (Task 4) ──────────────────────────────────────────
+        # Evaluate both overbought/extension guards once per loop. Each logs a
+        # WARNING when it fires; put_spread entries are only hard-blocked when
+        # BOTH fire together. Iron condors / strangles are never affected.
+        block_put_spreads = self._advisory_block_put_spreads(ms)
+
         expiry = date.today().strftime('%Y-%m-%d')
         # R1: snapshot broker positions at most once per loop and share it
         # across strategies, instead of one fetch per entry-eligible strategy.
@@ -818,8 +888,37 @@ class HermesEngine:
                 continue
             if not self._extra_ok(cfg, ms):
                 continue
+            # Task 4: advisory put_spread block (RSI overbought AND extended above
+            # VWAP, both firing). Scoped to put_spread; iron condors/strangles pass.
+            if block_put_spreads and cfg.spread_type == 'put_spread':
+                log.warning('%s: blocked — RSI overbought AND SPY extended above VWAP '
+                            '(both advisory filters fired). Skipping put_spread entry.', cfg.name)
+                continue
             log.info('Entry signal: %s', name)
             self._enter_spread(cfg, ms, now, expiry)
+
+    def _advisory_block_put_spreads(self, ms: dict) -> bool:
+        """Task 4: evaluate the two advisory entry filters and return True only
+        when BOTH fire (RSI overbought AND SPY > VWAP_EXTENDED_PCT above VWAP) —
+        the only condition that hard-blocks put_spread entries. A single trigger
+        logs a WARNING and returns False (advisory only)."""
+        # 1. RSI filter.
+        rsi = self._get_spy_rsi()
+        rsi_overbought = rsi is not None and rsi > RSI_OVERBOUGHT
+        if rsi_overbought:
+            log.warning('RSI overbought (%.1f) — skipping all put spread entries', rsi)
+
+        # 2. VWAP distance filter.
+        vwap = ms.get('vwap') or 0.0
+        spy  = ms.get('spy') or 0.0
+        vwap_extended = False
+        if vwap > 0 and spy > 0:
+            pct = (spy - vwap) / vwap * 100.0
+            if pct > VWAP_EXTENDED_PCT:
+                vwap_extended = True
+                log.warning('SPY extended above VWAP (%.2f%%) — skipping entries', pct)
+
+        return rsi_overbought and vwap_extended
 
     def _in_window(self, cfg: StrategyConfig, now: datetime) -> bool:
         if now.weekday() not in cfg.entry_days:
@@ -1036,6 +1135,15 @@ class HermesEngine:
             'order_id':        entry_order_id,       # Item 7: production order ID
             'real_fill_price': fill,                 # Item 7: actual net credit fill
         })
+        # Task 5: mirror the entry into the SQLite DB (best-effort, never blocks).
+        if DB_AVAILABLE:
+            vix3m = self._get_vix3m()
+            contango = round(vix3m / ms['vix'], 4) if (vix3m > 0 and ms.get('vix')) else None
+            db_manager.record_entry(
+                strategy=cfg.name, mode='LIVE', account=PROD_ACCOUNT,
+                entry_time=now.isoformat(), credit=fill, vix_entry=ms.get('vix'),
+                contango_entry=contango, spy_price=ms.get('spy'), order_id=entry_order_id,
+            )
         log.info('Entered %s: %dc credit=%.2f profit_at=%.2f stop_at=%.2f', cfg.name, cfg.contracts, fill, profit_thresh, stop_thresh)
         tg_send(
             f"🟢 HERMES ENTRY: {cfg.name} {cfg.spread_type.upper()} ({cfg.contracts}c)\n"
@@ -1397,6 +1505,12 @@ class HermesEngine:
             'market_regime':             pos.entry_state.get('market_regime'),
         }
         self._log_trade(trade)
+        # Task 5: update the SQLite mirror's matching open row to closed.
+        if DB_AVAILABLE:
+            db_manager.record_exit(
+                order_id=pos.entry_state.get('entry_order_id'),
+                exit_time=now.isoformat(), pnl=pnl, exit_reason=reason,
+            )
         log.info('Closed %s: reason=%s pnl=%.2f (%.2f/c) hold=%dm', pos.strategy, reason, pnl, pnl_per_contract, hold_min)
         tg_send(
             f"{'🟩' if pnl >= 0 else '🟥'} HERMES EXIT: {pos.strategy} | {reason}\n"

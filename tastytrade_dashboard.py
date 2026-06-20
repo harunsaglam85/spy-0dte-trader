@@ -4,7 +4,7 @@ import requests
 from datetime import datetime
 from dotenv import load_dotenv
 
-load_dotenv(r'C:\Users\sagla\.tastytrade-mcp\.env')
+load_dotenv('/root/spy-0dte-trader/.env')
 
 def _strip(val):
     return (val or '').strip("'\"")
