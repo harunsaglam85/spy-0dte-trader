@@ -434,6 +434,24 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     ),
 }
 
+# ── Dead / disabled strategies ──────────────────────────────────────────────────
+# Strategies listed here are kept in STRATEGIES for record/backtest parity but are
+# never allowed to fire live. Checked at the top of the entry loop, before any
+# window/VIX/credit evaluation, so a disabled strategy is fully inert.
+DISABLED_STRATEGIES: frozenset = frozenset({
+    'T12_max_data',  # KILLED 2026-06-22 — 15.4% WR, -$395 cumulative
+})
+
+# ── Latest-entry cutoffs ─────────────────────────────────────────────────────────
+# A hard "no new entries after this ET time" gate, layered on top of a strategy's
+# normal entry window. R3A/R3D get a 2:30 PM cutoff: by then 0DTE puts are too
+# illiquid for a clean fill — the deep-OTM long leg routinely shows a $0/missing
+# ask, so the combo's long leg rejects while the short leg fills. (June 22 fix.)
+LATEST_ENTRY_CUTOFF: Dict[str, Tuple[int, int]] = {
+    'R3A': (14, 30),
+    'R3D': (14, 30),
+}
+
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
 
@@ -851,6 +869,10 @@ class HermesEngine:
         # across strategies, instead of one fetch per entry-eligible strategy.
         open_syms: Optional[set] = None
         for name, cfg in STRATEGIES.items():
+            # Permanently disabled strategies never fire — checked first so no
+            # window/VIX/credit work is done on a killed strategy.
+            if name in DISABLED_STRATEGIES:
+                continue
             if cfg.spread_type == 'earnings':
                 # C3: S4 is DISABLED — triply broken as coded (audit June 11):
                 #   1. Never evaluates: S4_checked was set on the first loop
@@ -883,6 +905,15 @@ class HermesEngine:
             if not self._strategy_loss_ok(name):
                 continue
             if not self._in_window(cfg, now):
+                continue
+            # Latest-entry cutoff (R3A/R3D 2:30 PM ET): even inside the window,
+            # block new entries once 0DTE puts go illiquid late in the session —
+            # the long leg's $0/missing ask is what causes the combo's long leg to
+            # reject while the short leg fills.
+            cutoff = LATEST_ENTRY_CUTOFF.get(name)
+            if cutoff is not None and (now.hour, now.minute) >= cutoff:
+                log.info('%s: past latest-entry cutoff %02d:%02d ET — skip (0DTE puts too illiquid).',
+                         cfg.name, cutoff[0], cutoff[1])
                 continue
             # FIX 2: hard global VIX floor of 18 layered over each strategy's own
             # vix_min, without touching the STRATEGIES dict.
@@ -1027,9 +1058,20 @@ class HermesEngine:
         # rejected, rolled back, and after 3 attempts the strike is blacklisted,
         # burning the entry window and polluting the blacklist. Skip the entry
         # instead, WITHOUT recording a rejection or blacklisting the strike.
-        zero_ask_legs = [l for l in legs if l.side == 'buy_to_open' and l.fill_price <= 0]
+        #
+        # R3A/R3D late-day fix (June 22): the guard was checking the correct leg
+        # (buy_to_open = the lower-strike long put) but used `fill_price <= 0`,
+        # which silently passes a *missing* ask. On a deep-OTM 0DTE put with no
+        # offer late in the day, Tradier returns the ask field as NaN (not 0.0),
+        # and `float('nan') <= 0` is False — so the combo was submitted, the short
+        # leg filled and the long leg rejected. `not (price > 0)` instead catches
+        # $0, negative, AND NaN/missing asks, so the entry now skips cleanly with
+        # neither leg submitted.
+        def _ask_unusable(price: float) -> bool:
+            return not (price > 0)  # True for 0, negative, or NaN/missing
+        zero_ask_legs = [l for l in legs if l.side == 'buy_to_open' and _ask_unusable(l.fill_price)]
         if zero_ask_legs:
-            log.info('%s: long leg ask is zero — skipping entry (%s).',
+            log.info('%s: long leg ask is $0 or missing — skipping entry, no legs submitted (%s).',
                      cfg.name, [l.option_symbol for l in zero_ask_legs])
             return
 
