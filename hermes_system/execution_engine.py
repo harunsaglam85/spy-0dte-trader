@@ -294,7 +294,9 @@ STRATEGIES: Dict[str, StrategyConfig] = {
     'R10': StrategyConfig(
         name='R10', entry_days=frozenset({1}),
         entry_start=(10, 30), entry_end=(11, 30),
-        spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
+        # VIX RANGE 13-21 (from backtest), not a floor. Effective lower bound is
+        # clamped to GLOBAL_VIX_FLOOR (15.0), so R10 trades VIX 15-21 live.
+        spread_type='put_spread', vix_min=13.0, vix_max=21.0, delta_target=0.20,
         profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
         extra={'require_spy_above_ma50_and_vwap': True},
