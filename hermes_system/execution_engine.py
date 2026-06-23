@@ -98,9 +98,18 @@ PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
 MAX_LOSS_PER_CONTRACT = 200.0
 MAX_DAILY_LOSS        = 150.0     # LIVE daily stop — halts ALL new entries for the day
 
-# ── Credit gate (BUG 4) ────────────────────────────────────────────────────────
-# Day 1 data: every trade below $0.20 credit was stopped out; above $0.20 was profitable.
-MIN_CREDIT = 0.20
+# ── Credit gate (BUG 4 / June 22 live fix) ──────────────────────────────────────
+# The old hardcoded $0.20 floor filtered out every valid entry at VIX 16.x, where
+# the real credit on a $2-wide put spread is only $0.05-$0.13. The minimum is now
+# scaled to the live VIX at entry time: max(0.08, vix * 0.009) — e.g. VIX 16.5 →
+# $0.15, VIX 22 → $0.20. Computed in _enter_spread from ms['vix'].
+MIN_CREDIT_FLOOR = 0.08
+MIN_CREDIT_VIX_COEF = 0.009
+
+
+def _min_credit(vix: float) -> float:
+    """Dynamic minimum credit, scaled to the live VIX at entry (June 22 live fix)."""
+    return max(MIN_CREDIT_FLOOR, vix * MIN_CREDIT_VIX_COEF)
 
 # ── Global VIX floor (FIX 2) ───────────────────────────────────────────────────
 # 442-day backtest: VIX < 17 produced no tradable credit ($0.20+) on 90.7% of
@@ -995,8 +1004,13 @@ class HermesEngine:
         else:
             return
 
-        if not legs or credit < MIN_CREDIT:
-            log.info('%s: credit $%.2f below minimum $%.2f — skip.', cfg.name, credit, MIN_CREDIT)
+        # BUG 1 (June 22 live fix): the credit minimum scales with the live VIX,
+        # so VIX 16.x days (real credit $0.05-$0.13) are no longer filtered out by
+        # a flat $0.20 floor. vix is the value fetched at this entry (ms['vix']).
+        min_credit = _min_credit(ms['vix'])
+        if not legs or credit < min_credit:
+            log.info('%s: credit $%.2f below minimum $%.2f (VIX %.2f) — skip.',
+                     cfg.name, credit, min_credit, ms['vix'])
             return
 
         # FIX 1: if any leg's strike is in retry-loop backoff, skip the whole
@@ -1006,6 +1020,17 @@ class HermesEngine:
         blacklisted = [l.option_symbol for l in legs if self._is_blacklisted(l.option_symbol, now)]
         if blacklisted:
             log.info('%s: skip — strike(s) in retry-loop backoff: %s', cfg.name, blacklisted)
+            return
+
+        # BUG 2 (June 22 live fix): a long (buy_to_open) leg with a $0 ask means the
+        # chain has no real offer on that strike — submitting anyway gets the combo
+        # rejected, rolled back, and after 3 attempts the strike is blacklisted,
+        # burning the entry window and polluting the blacklist. Skip the entry
+        # instead, WITHOUT recording a rejection or blacklisting the strike.
+        zero_ask_legs = [l for l in legs if l.side == 'buy_to_open' and l.fill_price <= 0]
+        if zero_ask_legs:
+            log.info('%s: long leg ask is zero — skipping entry (%s).',
+                     cfg.name, [l.option_symbol for l in zero_ask_legs])
             return
 
         theoretical  = credit
@@ -1124,7 +1149,17 @@ class HermesEngine:
         # The stub is written second and now carries the leg symbols, so the
         # trade-log rebuild path can also match the legs and block re-entry even if
         # positions.json reconciliation drops the position (e.g. already expired).
-        self._save_positions()
+        # BUG 3 (June 22 live fix): confirm the durable write of the freshly filled
+        # position. If it fails, page Telegram — exit logic would otherwise run
+        # blind on frozen entry-credit values after a restart.
+        if self._save_positions():
+            log.info('%s: position written to positions.json (%d open).',
+                     cfg.name, len(self.positions))
+        else:
+            log.critical('%s: FAILED to write position to positions.json — exit logic '
+                         'at risk after restart. INVESTIGATE.', cfg.name)
+            tg_send(f'🚨 HERMES {cfg.name}: filled but positions.json write FAILED — '
+                    f'check engine immediately.')
         self._log_trade({
             'strategy':        cfg.name,
             'status':          'open',
@@ -1869,13 +1904,36 @@ class HermesEngine:
         tmp.write_text(json.dumps(obj, indent=2, default=str))
         os.replace(tmp, path)
 
-    def _save_positions(self) -> None:
+    def _save_positions(self) -> bool:
+        """Persist the in-memory positions to positions.json. Returns True on a
+        verified write, False on any failure.
+
+        BUG 3 (June 22 live fix): a confirmed fill must land in positions.json or
+        the exit logic runs blind on frozen entry-credit values. The write is now
+        wrapped in explicit error handling that logs the full traceback (the old
+        one-line error swallowed the root cause), and the file is read back and
+        compared so a silent partial/failed write is caught rather than assumed."""
         try:
-            self._atomic_write_json(
-                POSITIONS_FILE, [self._pos_to_dict(p) for p in self.positions]
-            )
-        except Exception as exc:
-            log.error('Failed to save positions: %s', exc)
+            payload = [self._pos_to_dict(p) for p in self.positions]
+        except Exception:
+            log.error('Failed to serialize positions for save:\n%s', traceback.format_exc())
+            return False
+        try:
+            self._atomic_write_json(POSITIONS_FILE, payload)
+        except Exception:
+            log.error('Failed to write %s:\n%s', POSITIONS_FILE, traceback.format_exc())
+            return False
+        # Verify the write actually landed — read it back and confirm the count.
+        try:
+            written = json.loads(POSITIONS_FILE.read_text() or '[]')
+            if len(written) != len(payload):
+                log.error('positions.json verify mismatch: wrote %d, read back %d.',
+                          len(payload), len(written))
+                return False
+        except Exception:
+            log.error('Could not verify %s after write:\n%s', POSITIONS_FILE, traceback.format_exc())
+            return False
+        return True
 
     def _load_positions(self) -> None:
         # FIX 2: loading tracked positions and rebuilding today's state from the
