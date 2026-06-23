@@ -1,0 +1,21 @@
+[0;1;32m●[0m thetadata.service - ThetaData Terminal
+     Loaded: loaded (/etc/systemd/system/thetadata.service; enabled; vendor preset: enabled)
+     Active: [0;1;32mactive (running)[0m since Thu 2026-06-18 01:25:18 UTC; 2 days ago
+   Main PID: 53839 (java)
+      Tasks: 62 (limit: 9243)
+     Memory: 616.7M
+        CPU: 10min 47.614s
+     CGroup: /system.slice/thetadata.service
+             ├─53839 /usr/bin/java -jar /root/ThetaTerminalv3.jar --creds-file /root/creds.txt
+             └─53867 java -XX:+IgnoreUnrecognizedVMOptions -Dtd.logDir=/tmp --sun-misc-unsafe-memory-access=allow --enable-native-access=ALL-UNNAMED -jar /root/lib/202606171.jar --creds-file /root/creds.txt
+
+Jun 18 16:30:02 hermes-backtester java[53867]: [06-18-2026 16:30:02.869] ERROR: Internal server error: Wrong number of data fields, expecting 11, got 6
+Jun 18 16:30:02 hermes-backtester java[53867]: If this issue persists please contact support.
+Jun 18 16:30:06 hermes-backtester java[53867]: [06-18-2026 16:30:06.264] ERROR: Internal server error: Wrong number of data fields, expecting 11, got 6
+Jun 18 16:30:06 hermes-backtester java[53867]: If this issue persists please contact support.
+Jun 18 16:30:13 hermes-backtester java[53867]: [06-18-2026 16:30:13.432] WARN: Got NOT_FOUND error: No data found for your request
+Jun 18 16:30:15 hermes-backtester java[53867]: [06-18-2026 16:30:15.609] WARN: Got NOT_FOUND error: No data found for your request
+Jun 18 16:30:20 hermes-backtester java[53867]: [06-18-2026 16:30:20.094] WARN: Got NOT_FOUND error: No data found for your request
+Jun 18 16:32:51 hermes-backtester java[53867]: [06-18-2026 16:32:51.312] WARN: Got NOT_FOUND error: No data found for your request
+Jun 18 16:32:54 hermes-backtester java[53867]: [06-18-2026 16:32:54.039] WARN: Got NOT_FOUND error: No data found for your request
+Jun 18 16:32:57 hermes-backtester java[53867]: [06-18-2026 16:32:57.958] WARN: Got NOT_FOUND error: No data found for your request

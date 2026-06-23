@@ -27,11 +27,20 @@ sys.path.insert(0, '/root/spy-0dte-trader')
 import json
 import logging
 import os
+import time
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytz
 import yfinance as yf
+
+# ── Timezone ───────────────────────────────────────────────────────────────────
+# Cron's `TZ=` is not reliably inherited by the spawned shell/python (this job was
+# firing at 05:20 ET = 09:20 UTC), so pin the process timezone here. This makes
+# every datetime.now()/time.localtime() and logging timestamp ET regardless of how
+# the job is invoked. Must run before logging is configured so asctime is ET too.
+os.environ['TZ'] = 'America/New_York'
+time.tzset()
 
 # ── Paths / logging ──────────────────────────────────────────────────────────
 HERMES_ROOT  = Path('/root/hermes_system')
@@ -42,7 +51,11 @@ LOG_DIR.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s %(levelname)s %(message)s',
-    handlers=[logging.FileHandler(LOG_DIR / 'market_data.log'), logging.StreamHandler()],
+    # Log ONLY to the file. The cron line redirects stdout+stderr into this same
+    # market_data.log (`>> … 2>&1`); a StreamHandler (→ stderr) would then write
+    # every line a SECOND time via that shell redirect — the source of the
+    # duplicated log lines. FileHandler alone = exactly one line per event.
+    handlers=[logging.FileHandler(LOG_DIR / 'market_data.log')],
 )
 log = logging.getLogger('hermes.market_data')
 
@@ -213,7 +226,22 @@ def collect_economic_events(days_ahead: int = 14) -> list:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+def _ensure_market_open(gate_hour: int = 9, gate_minute: int = 25) -> None:
+    """Block until at/after the 09:25 ET data gate. VIX / quotes pulled before
+    the cash open return stale pre-market values, so we wait rather than snapshot
+    garbage. Cron fires this job at 09:20 ET, so the wait is normally ~5 min; a
+    run already at/after 09:25 proceeds immediately."""
+    now = datetime.now(ET)
+    gate = now.replace(hour=gate_hour, minute=gate_minute, second=0, microsecond=0)
+    if now < gate:
+        wait_s = (gate - now).total_seconds()
+        log.info('Market not open yet (%s ET) — waiting %.0fs until %02d:%02d ET.',
+                 now.strftime('%H:%M:%S'), wait_s, gate_hour, gate_minute)
+        time.sleep(wait_s)
+
+
 def main() -> None:
+    _ensure_market_open()
     now = datetime.now(ET)
     log.info('Market data collection starting (%s ET).', now.isoformat())
     context = {
