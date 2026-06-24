@@ -60,6 +60,7 @@ TRADES_DIR     = HERMES_ROOT / 'trades'
 LOG_DIR        = HERMES_ROOT / 'logs'
 POSITIONS_FILE = HERMES_ROOT / 'positions.json'
 HEARTBEAT_FILE = HERMES_ROOT / 'heartbeat.txt'
+MARKET_CONTEXT_FILE = HERMES_ROOT / 'market_context.json'
 for _d in (TRADES_DIR, LOG_DIR):
     _d.mkdir(parents=True, exist_ok=True)
 
@@ -119,6 +120,7 @@ def _min_credit(vix: float) -> float:
 # single hard floor at entry time: the effective minimum is max(cfg.vix_min, 18).
 # Strategies already at 20+ are unaffected.
 GLOBAL_VIX_FLOOR = 15.0
+IC_VIX_MAX = 18.0   # iron condor VIX cap — elevated vol makes call side dangerous
 
 # ── Order fill tracking (audit C5) ─────────────────────────────────────────────
 # Sandbox positions can lag accepted orders by 10-30s, so fills are verified by
@@ -258,21 +260,21 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         name='R3A', entry_days=frozenset({0}),
         entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'R3B': StrategyConfig(
         name='R3B', entry_days=frozenset({2}),
         entry_start=(10, 30), entry_end=(10, 45),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'R3D': StrategyConfig(
         name='R3D', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 15), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
         extra={},
     ),
@@ -287,7 +289,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         name='R8', entry_days=frozenset({4}),
         entry_start=(13, 0), entry_end=(13, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.70, stop_multiple=1.8, force_exit_time=(15, 30),
+        profit_target_pct=0.50, stop_multiple=1.8, force_exit_time=(15, 30),
         contracts=1, spread_width=2.0,
         extra={'require_spy_above_vwap': True},
     ),
@@ -297,7 +299,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         # VIX RANGE 13-21 (from backtest), not a floor. Effective lower bound is
         # clamped to GLOBAL_VIX_FLOOR (15.0), so R10 trades VIX 15-21 live.
         spread_type='put_spread', vix_min=13.0, vix_max=21.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
         extra={'require_spy_above_ma50_and_vwap': True},
     ),
@@ -314,84 +316,84 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         name='T1_thursday_put', entry_days=frozenset({3}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T2_monday_afternoon': StrategyConfig(
         name='T2_monday_afternoon', entry_days=frozenset({0}),
         entry_start=(13, 0), entry_end=(13, 30),
         spread_type='put_spread', vix_min=19.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T3_wednesday_afternoon': StrategyConfig(
         name='T3_wednesday_afternoon', entry_days=frozenset({2}),
         entry_start=(13, 0), entry_end=(13, 30),
         spread_type='put_spread', vix_min=19.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T4_friday_morning': StrategyConfig(
         name='T4_friday_morning', entry_days=frozenset({4}),
         entry_start=(10, 0), entry_end=(10, 30),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 30),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 30),
         contracts=1, spread_width=2.0,
     ),
     'T7_high_vix': StrategyConfig(
         name='T7_high_vix', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(10, 0), entry_end=(11, 0),
         spread_type='put_spread', vix_min=20.0, vix_max=28.0, delta_target=0.15,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T8_delta_015': StrategyConfig(
         name='T8_delta_015', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.15,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T9_delta_025': StrategyConfig(
         name='T9_delta_025', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.25,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T10_wide_spread': StrategyConfig(
         name='T10_wide_spread', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=3.0,
     ),
     'T11_narrow_spread': StrategyConfig(
         name='T11_narrow_spread', entry_days=frozenset({0, 2, 4}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=1.0,
     ),
     'T12_max_data': StrategyConfig(
         name='T12_max_data', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(10, 0), entry_end=(14, 0),
         spread_type='put_spread', vix_min=14.0, vix_max=24.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T13_thursday_afternoon': StrategyConfig(
         name='T13_thursday_afternoon', entry_days=frozenset({3}),
         entry_start=(13, 0), entry_end=(14, 0),
         spread_type='put_spread', vix_min=15.0, vix_max=22.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
     ),
     'T14_vix_transition': StrategyConfig(
         name='T14_vix_transition', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(10, 0), entry_end=(14, 0),
         spread_type='put_spread', vix_min=17.0, vix_max=20.0, delta_target=0.20,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=2.0,
         extra={'require_vix_falling': True},
     ),
@@ -408,14 +410,14 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         name='E6_afternoon_decay', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(14, 0), entry_end=(14, 30),
         spread_type='put_spread', vix_min=13.0, vix_max=20.0, delta_target=0.15,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=3.0,
     ),
     'E7_lowvix_ic': StrategyConfig(
         name='E7_lowvix_ic', entry_days=frozenset({0, 1, 3, 4}),
         entry_start=(10, 30), entry_end=(11, 0),
         spread_type='iron_condor', vix_min=13.0, vix_max=18.0, delta_target=0.15,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=3.0,
     ),
     # ── E8 (afternoon strangle, D1 candidate) — 1 contract ──────────────────────
@@ -431,7 +433,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
         name='E8_afternoon_strangle', entry_days=frozenset({0, 1, 2, 3, 4}),
         entry_start=(14, 0), entry_end=(15, 0),
         spread_type='iron_condor', vix_min=13.0, vix_max=22.0, delta_target=0.30,
-        profit_target_pct=0.75, stop_multiple=2.0, force_exit_time=(15, 45),
+        profit_target_pct=0.50, stop_multiple=2.0, force_exit_time=(15, 45),
         contracts=1, spread_width=5.0,
     ),
 }
@@ -444,15 +446,13 @@ DISABLED_STRATEGIES: frozenset = frozenset({
     'T12_max_data',  # KILLED 2026-06-22 — 15.4% WR, -$395 cumulative
 })
 
-# ── Latest-entry cutoffs ─────────────────────────────────────────────────────────
-# A hard "no new entries after this ET time" gate, layered on top of a strategy's
-# normal entry window. R3A/R3D get a 2:30 PM cutoff: by then 0DTE puts are too
-# illiquid for a clean fill — the deep-OTM long leg routinely shows a $0/missing
-# ask, so the combo's long leg rejects while the short leg fills. (June 22 fix.)
-LATEST_ENTRY_CUTOFF: Dict[str, Tuple[int, int]] = {
-    'R3A': (14, 30),
-    'R3D': (14, 30),
-}
+# ── Latest-entry cutoff ──────────────────────────────────────────────────────
+# Hard "no new entries at or after 2:00 PM ET" gate applied to ALL strategies.
+# 0DTE options go illiquid from 2 PM onward — the deep-OTM long leg routinely
+# shows a $0/missing ask, causing the combo long leg to reject while the short
+# leg fills. Previously only R3A/R3D had a 2:30 PM cutoff; all strategies now
+# share the earlier 2:00 PM gate for less gamma risk.
+GLOBAL_LATEST_ENTRY_CUTOFF: Tuple[int, int] = (14, 0)
 
 
 # ── Utilities ──────────────────────────────────────────────────────────────────
@@ -528,6 +528,8 @@ class HermesEngine:
         # built from cannot change intraday, so there is no value in recomputing.
         self._rsi_today:      Optional[float] = None
         self._rsi_date:       Optional[date]  = None
+        self._sma5_bias:      str             = 'condor'  # from market_context.json
+        self._load_sma5_bias()
         self._load_positions()
 
     # ── Main loop ─────────────────────────────────────────────────────────────
@@ -545,6 +547,7 @@ class HermesEngine:
         log.info('LIVE MODE — production account %s', PROD_ACCOUNT or '(unset)')
         log.info('Hermes Engine starting — %d strategies active. Daily loss limit $%.0f, 1 contract/strategy.',
                  n, MAX_DAILY_LOSS)
+        log.info('Closing at 50%% profit target (was 75%%)')
         tg_send(f'🚀 Hermes Engine started — LIVE account {PROD_ACCOUNT} — {n} strategies, '
                 f'$150 daily loss limit, 1 contract each.')
         # Item 6: pre-flight before any trading. A failure pauses entries (sets
@@ -696,6 +699,23 @@ class HermesEngine:
         except Exception as exc:
             log.warning('RSI computation failed: %s — skipping RSI filter today.', exc)
             return None
+
+    def _load_sma5_bias(self) -> None:
+        """Load spy_sma5_bias from market_context.json. Called at startup and daily
+        reset. Defaults to 'condor' (neutral) when the file is missing or the key
+        is absent — a missing context file never blocks entries."""
+        try:
+            if MARKET_CONTEXT_FILE.exists():
+                ctx  = json.loads(MARKET_CONTEXT_FILE.read_text())
+                bias = ctx.get('spy_sma5_bias', 'condor')
+                self._sma5_bias = bias if bias in ('puts', 'calls', 'condor') else 'condor'
+                log.info('SMA5 bias loaded: %s', self._sma5_bias)
+            else:
+                self._sma5_bias = 'condor'
+                log.info('market_context.json not found — SMA5 bias defaulting to condor.')
+        except Exception as exc:
+            self._sma5_bias = 'condor'
+            log.warning('Failed to load SMA5 bias: %s — defaulting to condor.', exc)
 
     def _regime(self, vix: float) -> str:
         if vix < 15:  return 'low_vol'
@@ -908,14 +928,10 @@ class HermesEngine:
                 continue
             if not self._in_window(cfg, now):
                 continue
-            # Latest-entry cutoff (R3A/R3D 2:30 PM ET): even inside the window,
-            # block new entries once 0DTE puts go illiquid late in the session —
-            # the long leg's $0/missing ask is what causes the combo's long leg to
-            # reject while the short leg fills.
-            cutoff = LATEST_ENTRY_CUTOFF.get(name)
-            if cutoff is not None and (now.hour, now.minute) >= cutoff:
-                log.info('%s: past latest-entry cutoff %02d:%02d ET — skip (0DTE puts too illiquid).',
-                         cfg.name, cutoff[0], cutoff[1])
+            # Latest-entry cutoff: no new entries at or after 2:00 PM ET for any strategy.
+            if (now.hour, now.minute) >= GLOBAL_LATEST_ENTRY_CUTOFF:
+                log.info('%s: Entry skipped — past 2:00 PM cutoff.', cfg.name)
+                continue
                 continue
             # FIX 2: hard global VIX floor of 18 layered over each strategy's own
             # vix_min, without touching the STRATEGIES dict.
@@ -928,6 +944,9 @@ class HermesEngine:
                 continue
             if ms['vix'] >= cfg.vix_max:
                 continue
+            if cfg.spread_type == 'iron_condor' and ms['vix'] >= IC_VIX_MAX:
+                log.info('%s: VIX too high for iron condor — skipping (VIX=%.2f).', cfg.name, ms['vix'])
+                continue
             if not self._extra_ok(cfg, ms):
                 continue
             # Task 4: advisory put_spread block (RSI overbought AND extended above
@@ -936,6 +955,10 @@ class HermesEngine:
                 log.warning('%s: blocked — RSI overbought AND SPY extended above VWAP '
                             '(both advisory filters fired). Skipping put_spread entry.', cfg.name)
                 continue
+            if name in ('R3A', 'R3D') and cfg.spread_type == 'put_spread':
+                if self._sma5_bias == 'calls':
+                    log.info('%s: SMA5 bias is bearish — skipping put spread', cfg.name)
+                    continue
             log.info('Entry signal: %s', name)
             self._enter_spread(cfg, ms, now, expiry)
 
@@ -2084,6 +2107,7 @@ class HermesEngine:
         log.info('Daily reset: %s', self.today)
         # Item 6: re-run pre-flight at the start of each new trading day.
         self._preflight()
+        self._load_sma5_bias()
 
     def _strategy_already_open(self, name: str, open_syms: set) -> bool:
         """Check a shared snapshot of live Tradier positions (fetched once per

@@ -226,6 +226,43 @@ def collect_economic_events(days_ahead: int = 14) -> list:
 
 # ── Main ─────────────────────────────────────────────────────────────────────
 
+
+# ── SPY SMA5 directional filter ──────────────────────────────────────────────
+
+def collect_sma5() -> dict:
+    """SPY 5-day simple moving average directional filter.
+
+    Compares the most recent SPY close to the SMA of the last 5 trading-day
+    closes. Within 0.2% of the SMA is treated as neutral (condor). Result is
+    stored in market_context.json and read by execution_engine at startup.
+    """
+    result = {"spy_sma5": None, "spy_vs_sma5": "unknown", "spy_sma5_bias": "condor"}
+    try:
+        hist = yf.Ticker("SPY").history(period="15d")  # extra buffer for holidays
+        if hist is None or hist.empty:
+            log.warning("collect_sma5: no SPY history returned.")
+            return result
+        closes = hist["Close"].dropna()
+        if len(closes) < 5:
+            log.warning("collect_sma5: only %d closes — need 5.", len(closes))
+            return result
+        sma5     = round(float(closes.iloc[-5:].mean()), 2)
+        spy_last = round(float(closes.iloc[-1]), 2)
+        pct_diff = (spy_last - sma5) / sma5 * 100.0
+        if pct_diff > 0.2:
+            vs_sma5, bias = "above", "puts"    # bullish — put spreads favored
+        elif pct_diff < -0.2:
+            vs_sma5, bias = "below", "calls"   # bearish — skip put spreads
+        else:
+            vs_sma5, bias = "neutral", "condor"
+        result = {"spy_sma5": sma5, "spy_vs_sma5": vs_sma5, "spy_sma5_bias": bias}
+        log.info("SMA5: SPY=%.2f SMA5=%.2f (%.2f%%) -> vs=%s bias=%s",
+                 spy_last, sma5, pct_diff, vs_sma5, bias)
+    except Exception as exc:
+        log.error("collect_sma5 failed: %s", exc)
+    return result
+
+
 def _ensure_market_open(gate_hour: int = 9, gate_minute: int = 25) -> None:
     """Block until at/after the 09:25 ET data gate. VIX / quotes pulled before
     the cash open return stale pre-market values, so we wait rather than snapshot
@@ -244,6 +281,7 @@ def main() -> None:
     _ensure_market_open()
     now = datetime.now(ET)
     log.info('Market data collection starting (%s ET).', now.isoformat())
+    sma5_data = collect_sma5()
     context = {
         'generated_at': now.isoformat(),
         'date': now.date().isoformat(),
@@ -251,6 +289,9 @@ def main() -> None:
         'volatility': collect_volatility(),
         'earnings_next_5_days': collect_earnings(days_ahead=5),
         'economic_events_next_2_weeks': collect_economic_events(days_ahead=14),
+        'spy_sma5':      sma5_data.get('spy_sma5'),
+        'spy_vs_sma5':   sma5_data.get('spy_vs_sma5', 'unknown'),
+        'spy_sma5_bias': sma5_data.get('spy_sma5_bias', 'condor'),
     }
     _atomic_write_json(OUTPUT_FILE, context)
     log.info('Wrote market context → %s', OUTPUT_FILE)
