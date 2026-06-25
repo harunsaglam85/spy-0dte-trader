@@ -443,6 +443,7 @@ STRATEGIES: Dict[str, StrategyConfig] = {
 # never allowed to fire live. Checked at the top of the entry loop, before any
 # window/VIX/credit evaluation, so a disabled strategy is fully inert.
 DISABLED_STRATEGIES: frozenset = frozenset({
+    'R3C',  # KILLED — confirmed real-data losses, bear call strategy,
     'T12_max_data',  # KILLED 2026-06-22 — 15.4% WR, -$395 cumulative
 })
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Hermes Trigger — Reads daily_brief.txt, calls OpenRouter API (claude-sonnet-4-6),
+Hermes Trigger — Reads daily_brief.txt, calls OpenRouter API (claude-haiku-4-5),
 answers 4 focused questions, saves to insights/YYYY-MM-DD.md, sends to Telegram.
 Cron: 0 17 * * 1-5  (5:00 PM ET)
 Target: <3 000 tokens/call ≈ $0.05/day
