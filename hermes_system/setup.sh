@@ -110,7 +110,7 @@ fi
 
 # ── 5. Python smoke test ──────────────────────────────────────
 echo ""
-echo "[5/6] Python smoke test..."
+echo "[5/7] Python smoke test..."
 cd /root/spy-0dte-trader
 python - <<'PYEOF'
 import sys
@@ -125,6 +125,7 @@ for mod in [
     'hermes_system.hermes_daily_brief',
     'hermes_system.hermes_trigger',
     'hermes_system.monitor',
+    'hermes_system.kill_switch',
 ]:
     try:
         __import__(mod)
@@ -153,7 +154,7 @@ ok "Smoke test passed."
 
 # ── 6. Cron jobs ──────────────────────────────────────────────
 echo ""
-echo "[6/6] Installing cron jobs..."
+echo "[6/7] Installing cron jobs..."
 
 # Preserve existing non-hermes crontab entries
 crontab -l 2>/dev/null | grep -v 'hermes' > /tmp/_hermes_cron || true
@@ -191,10 +192,26 @@ ok "Cron jobs installed:"
 crontab -l | grep -E '(hermes|TZ=)'
 echo ""
 
+# ── Kill switch service ───────────────────────────────────────
+echo ""
+echo "[7/7] Installing hermes-kill-switch systemd service..."
+cp /root/spy-0dte-trader/hermes_system/systemd/hermes-kill-switch.service /etc/systemd/system/
+systemctl daemon-reload
+systemctl enable hermes-kill-switch
+systemctl restart hermes-kill-switch
+KS_STATUS=$(systemctl is-active hermes-kill-switch 2>/dev/null)
+if [ "$KS_STATUS" = "active" ]; then
+    ok "hermes-kill-switch: active"
+else
+    warn "hermes-kill-switch status: $KS_STATUS — check 'journalctl -u hermes-kill-switch'"
+fi
+
 echo "============================================================"
 echo "  Setup complete. Hermes System is ready."
 echo ""
 echo "  Start monitor:   python /root/spy-0dte-trader/hermes_system/monitor.py"
 echo "  Run manual test: python /root/spy-0dte-trader/hermes_system/pattern_engine.py"
 echo "  View logs:       tail -f /root/hermes_system/logs/execution.log"
+echo "  Kill switch:     journalctl -u hermes-kill-switch -f"
+echo "  Phone commands:  /restart /logs /vix /positions /pnl /health"
 echo "============================================================"
