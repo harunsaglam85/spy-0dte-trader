@@ -504,6 +504,8 @@ class HermesEngine:
         # Item 6: pre-flight gate. Entries are blocked until pre-flight passes; a
         # failure pauses entries (positions still monitored/exited) without crashing.
         self.preflight_ok: bool = False
+        self._preflight_fail_reason: str = ''     # FIX 4: reason for last pre-flight failure
+        self._preflight_alert_sent: bool = False  # FIX 4: Telegram alert sent at 09:35 today
         # FIX 3: last time a rollback Telegram alert was sent, per strategy.
         self.last_rollback_alert: Dict[str, float] = {}
         # FIX 1: retry-loop backoff. order_blacklist maps an option symbol to the
@@ -551,6 +553,12 @@ class HermesEngine:
         log.info('Closing at 50%% profit target (was 75%%)')
         tg_send(f'🚀 Hermes Engine started — LIVE account {PROD_ACCOUNT} — {n} strategies, '
                 f'$150 daily loss limit, 1 contract each.')
+        # FIX 2: skip pre-flight until 09:25 ET to avoid ThetaData 04:00 ET daily reset.
+        _now_et = datetime.now(ET)
+        if (_now_et.hour, _now_et.minute) < (9, 25):
+            _wait = (_now_et.replace(hour=9, minute=25, second=0, microsecond=0) - _now_et).total_seconds()
+            log.info('Pre-market: sleeping %.0fs until 09:25 ET before pre-flight.', _wait)
+            time.sleep(max(0.0, _wait))
         # Item 6: pre-flight before any trading. A failure pauses entries (sets
         # preflight_ok=False) but does not stop the loop, so exits keep running.
         self._preflight()
@@ -625,17 +633,19 @@ class HermesEngine:
             vix = 0.0  # fail closed — 0.0 fails every vix_min check (same as get_vix)
         vix_prev  = self._get_vix_yesterday(vix_q)
         ma50      = self._calc_ma50('SPY')
-        if vwap == 0.0:
-            log.warning('VWAP is 0.0 — feed not ready, blocking VWAP-dependent entries.')
+        if vwap is None:
+            log.warning('VWAP returned None (parse error) — VWAP filter skipped this cycle.')
+        elif vwap == 0.0:
+            log.warning('VWAP is 0.0 — no bars yet, VWAP filter skipped this cycle.')
         return {
             'timestamp':      now,
             'spy':            spy,
             'vix':            vix,
             'vix_yesterday':  vix_prev,
             'vix_falling':    bool(vix < vix_prev) if vix_prev else None,
-            'vwap':           vwap,
+            'vwap':           vwap if vwap is not None else 0.0,
             'ma50':           ma50,
-            'spy_above_vwap': bool(spy > vwap) if vwap else False,
+            'spy_above_vwap': (bool(spy > vwap) if vwap else None),
             'spy_above_ma50': bool(spy > ma50) if ma50 else None,
             'vix_direction':  'neutral',
             'market_regime':  self._regime(vix),
@@ -838,13 +848,23 @@ class HermesEngine:
         elif bal < 500.0:
             failures.append(f'balance ${bal:.2f} < $500 minimum')
 
-        # 3. ThetaData snapshot endpoint responding.
-        try:
-            r = requests.get('http://localhost:25503/v3/option/snapshot/quote?symbol=SPY', timeout=10)
-            if not r.ok:
-                failures.append(f'ThetaData HTTP {r.status_code}')
-        except Exception as exc:
-            failures.append(f'ThetaData error: {exc}')
+        # 3. ThetaData snapshot endpoint responding — retry up to 5x (HTTP 400 at 04:00 ET reset).
+        _td_ok = False
+        _td_last_err = ''
+        for _attempt in range(1, 6):
+            try:
+                r = requests.get('http://localhost:25503/v3/option/snapshot/quote?symbol=SPY', timeout=10)
+                if r.ok:
+                    _td_ok = True
+                    break
+                _td_last_err = f'HTTP {r.status_code}'
+            except Exception as _exc:
+                _td_last_err = f'error: {_exc}'
+            log.warning('ThetaData pre-flight retry %d/5 — %s, waiting 60s', _attempt, _td_last_err)
+            if _attempt < 5:
+                time.sleep(60)
+        if not _td_ok:
+            failures.append(f'ThetaData {_td_last_err} after 5 retries')
 
         # 4. VIX feed working.
         try:
@@ -856,11 +876,13 @@ class HermesEngine:
 
         if failures:
             self.preflight_ok = False
-            reason = '; '.join(failures)
-            log.warning('⚠️ Pre-flight failed: %s — entries paused.', reason)
-            tg_send(f'⚠️ Pre-flight failed: {reason} — entries paused (positions still monitored).')
+            self._preflight_fail_reason = '; '.join(failures)
+            log.warning('⚠️ Pre-flight failed: %s — entries paused.', self._preflight_fail_reason)
+            # FIX 4: alert deferred to 09:35 ET in _check_entries (avoids 04:00 noise).
         else:
             self.preflight_ok = True
+            self._preflight_fail_reason = ''
+            self._preflight_alert_sent  = False
             log.info('✅ Pre-flight passed — LIVE trading active (balance $%.2f).', bal)
             tg_send(f'✅ Pre-flight passed — LIVE trading active. Balance ${bal:.2f}.')
 
@@ -869,6 +891,14 @@ class HermesEngine:
     def _check_entries(self, ms: dict, now: datetime) -> None:
         # Item 6: never enter while pre-flight is failing (API/balance/data/VIX).
         if not self.preflight_ok:
+            # FIX 4: one Telegram alert at/after 09:35 ET with VIX and regime context.
+            if (not self._preflight_alert_sent
+                    and self._preflight_fail_reason
+                    and now.hour == 9 and now.minute >= 35):
+                tg_send(f'⚠️ HERMES: Pre-flight failed — entries blocked.\n'
+                        f'Reason: {self._preflight_fail_reason} | '
+                        f'VIX: {ms.get("vix", 0.0):.1f} | Regime: {ms.get("market_regime", "unknown")}')
+                self._preflight_alert_sent = True
             log.warning('Pre-flight not passed — entries paused (positions still monitored).')
             return
         if not self._check_term_structure():
@@ -997,12 +1027,12 @@ class HermesEngine:
         if x.get('skip_fomc_weeks') and self._is_fomc_week(ms['timestamp'].date()):
             log.info('%s: FOMC week — skip.', cfg.name)
             return False
-        if x.get('require_spy_above_vwap') and not ms.get('spy_above_vwap'):
+        if x.get('require_spy_above_vwap') and ms.get('spy_above_vwap') is False:
             return False
         if x.get('require_spy_below_vwap') and ms.get('spy_above_vwap') is not False:
             return False
         if x.get('require_spy_above_ma50_and_vwap'):
-            if not (ms.get('spy_above_vwap') and ms.get('spy_above_ma50')):
+            if ms.get('spy_above_vwap') is False or not ms.get('spy_above_ma50'):
                 return False
         if x.get('require_vix_falling') and not ms.get('vix_falling'):
             return False
@@ -2105,6 +2135,8 @@ class HermesEngine:
         self._daily_limit_alerted = False
         self._contango_today      = None
         self._contango_checked_at = 0.0
+        self._preflight_fail_reason = ''     # FIX 4: reset for new day
+        self._preflight_alert_sent  = False  # FIX 4: reset for new day
         log.info('Daily reset: %s', self.today)
         # Item 6: re-run pre-flight at the start of each new trading day.
         self._preflight()

@@ -486,8 +486,9 @@ class DataFeeds:
         self._vix_cache = (vix, time.monotonic())
         return vix
 
-    def get_spy_vwap(self) -> float:
-        """Compute cumulative VWAP from Tradier timesales bars since market open."""
+    def get_spy_vwap(self) -> Optional[float]:
+        """Compute cumulative VWAP from Tradier timesales bars since market open.
+        Returns None on response-parsing errors so callers can skip the VWAP filter."""
         try:
             import datetime as _dtm
             now_ny = _dtm.datetime.now(NY_TZ)
@@ -497,23 +498,30 @@ class DataFeeds:
                 'symbol': 'SPY', 'interval': '5min',
                 'start': start_str, 'end': end_str, 'session_filter': 'open'
             })
-            if not data or not isinstance(data, dict):
-                self.logger.warning('get_spy_vwap: timesales returned None — using SPY spot as proxy')
-                return self.get_spy_price()
+            if not isinstance(data, dict):
+                self.logger.warning('get_spy_vwap: unexpected response type %s — returning None',
+                                    type(data).__name__)
+                return None
             bars = (data.get('series') or {}).get('data') or []
             if not bars:
                 self.logger.warning('get_spy_vwap: no timesales bars — returning 0.0')
                 return 0.0
-            total_pv = sum(float(b['vwap']) * float(b['volume']) for b in bars)
-            total_v  = sum(float(b['volume']) for b in bars)
+            if isinstance(bars, dict):  # single bar returned as dict, not list
+                bars = [bars]
+            try:
+                total_pv = sum(float(b['vwap']) * float(b['volume']) for b in bars)
+                total_v  = sum(float(b['volume']) for b in bars)
+            except (TypeError, KeyError, ValueError) as parse_exc:
+                self.logger.warning('get_spy_vwap: bar parse error %s — returning None', parse_exc)
+                return None
             if total_v == 0:
                 return 0.0
             vwap = round(total_pv / total_v, 4)
             self.logger.info('get_spy_vwap: %.4f (%d bars)', vwap, len(bars))
             return vwap
         except Exception as exc:
-            self.logger.error('get_spy_vwap error: %s — returning 0.0', exc)
-            return 0.0
+            self.logger.error('get_spy_vwap error: %s — returning None', exc)
+            return None
     def get_spy_price(self) -> float:
         """Return the latest SPY last-trade price via Tradier.
 
