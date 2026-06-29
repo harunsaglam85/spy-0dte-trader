@@ -822,6 +822,14 @@ class HermesEngine:
             log.warning('Balance fetch error: %s', exc)
             return None
 
+    def _next_trading_day(self, today: date) -> date:
+        """Soonest NYSE trading day on or after `today`, skipping weekends and
+        holidays. On a weekday that is not a holiday this returns `today`."""
+        d = today
+        while d.weekday() >= 5 or d in MARKET_HOLIDAYS_2026:
+            d += timedelta(days=1)
+        return d
+
     def _preflight(self) -> None:
         """Item 6: verify the live trading stack before any entries are allowed.
         Checks (1) production API auth, (2) account balance >= $500, (3) ThetaData
@@ -849,22 +857,32 @@ class HermesEngine:
             failures.append(f'balance ${bal:.2f} < $500 minimum')
 
         # 3. ThetaData snapshot endpoint responding — retry up to 5x (HTTP 400 at 04:00 ET reset).
-        _td_ok = False
-        _td_last_err = ''
-        for _attempt in range(1, 6):
-            try:
-                r = requests.get('http://localhost:25503/v3/option/snapshot/quote?symbol=SPY', timeout=10)
-                if r.ok:
-                    _td_ok = True
-                    break
-                _td_last_err = f'HTTP {r.status_code}'
-            except Exception as _exc:
-                _td_last_err = f'error: {_exc}'
-            log.warning('ThetaData pre-flight retry %d/5 — %s, waiting 60s', _attempt, _td_last_err)
-            if _attempt < 5:
-                time.sleep(60)
-        if not _td_ok:
-            failures.append(f'ThetaData {_td_last_err} after 5 retries')
+        # Weekends are skipped: markets are closed, so there is nothing to verify.
+        # ThetaData v3 requires an expiration date on the quote snapshot; without one
+        # it returns HTTP 400, so we pin the next trading day's expiry.
+        _today = datetime.now(ET).date()
+        if _today.weekday() >= 5:
+            log.info('Weekend — skipping ThetaData pre-flight check')
+        else:
+            _exp = self._next_trading_day(_today).strftime('%Y%m%d')
+            _url = ('http://localhost:25503/v3/option/snapshot/quote'
+                    f'?symbol=SPY&expiration={_exp}')
+            _td_ok = False
+            _td_last_err = ''
+            for _attempt in range(1, 6):
+                try:
+                    r = requests.get(_url, timeout=10)
+                    if r.ok:
+                        _td_ok = True
+                        break
+                    _td_last_err = f'HTTP {r.status_code}'
+                except Exception as _exc:
+                    _td_last_err = f'error: {_exc}'
+                log.warning('ThetaData pre-flight retry %d/5 — %s, waiting 60s', _attempt, _td_last_err)
+                if _attempt < 5:
+                    time.sleep(60)
+            if not _td_ok:
+                failures.append(f'ThetaData {_td_last_err} after 5 retries')
 
         # 4. VIX feed working.
         try:
