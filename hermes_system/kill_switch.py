@@ -108,6 +108,29 @@ def handle_restart(chat_id: int) -> None:
     tg_send(chat_id, f'hermes-engine: {active} (PID {pid})')
 
 
+# ── /stop: emergency kill switch (audit C1) ──────────────────────────────────
+# Two-step confirmation: the first /stop arms the switch, a second /stop within
+# STOP_CONFIRM_WINDOW seconds executes kill_switch.sh (engine stop + flatten).
+STOP_CONFIRM_WINDOW = 60.0
+_stop_armed_at = 0.0
+
+
+def handle_stop(chat_id: int) -> None:
+    global _stop_armed_at
+    now = time.monotonic()
+    if now - _stop_armed_at > STOP_CONFIRM_WINDOW:
+        _stop_armed_at = now
+        tg_send(chat_id,
+                '⚠️ KILL SWITCH armed. This will STOP hermes-engine and flatten '
+                'all open short legs at the broker.\n'
+                f'Send /stop again within {int(STOP_CONFIRM_WINDOW)}s to confirm.')
+        return
+    _stop_armed_at = 0.0
+    tg_send(chat_id, '🛑 KILL SWITCH confirmed — stopping engine and flattening positions...')
+    out = run_cmd('bash /root/hermes_system/kill_switch.sh', timeout=300)
+    tg_send(chat_id, f'kill_switch.sh finished:\n{out[-1500:]}')
+
+
 def handle_logs(chat_id: int) -> None:
     out = run_cmd(
         'journalctl -u hermes-engine --since "today" --no-pager | tail -20',
@@ -220,6 +243,7 @@ def handle_health(chat_id: int) -> None:
 # ── Dispatch table ────────────────────────────────────────────────────────────
 
 HANDLERS = {
+    '/stop':      handle_stop,
     '/restart':   handle_restart,
     '/logs':      handle_logs,
     '/vix':       handle_vix,
@@ -240,6 +264,12 @@ def main() -> None:
 
     log.info('Kill switch started (authorized chat: %s)', ALLOWED_CHAT_ID)
     offset = 0
+    # Audit C1/L4: discard any updates queued while the service was down so a
+    # stale command (especially an old /stop pair) can never replay on startup.
+    backlog = get_updates(offset)
+    if backlog:
+        offset = backlog[-1]['update_id'] + 1
+        log.info('Discarded %d stale queued update(s) on startup.', len(backlog))
 
     while True:
         updates = get_updates(offset)

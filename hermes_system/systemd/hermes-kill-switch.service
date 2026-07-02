@@ -1,7 +1,7 @@
 [Unit]
-Description=Hermes Kill Switch — zero-token Telegram command handler
-After=network.target
-Wants=network.target
+Description=Hermes Telegram kill switch / remote control (audit C1)
+After=network-online.target
+Wants=network-online.target
 
 [Service]
 Type=simple
@@ -11,8 +11,6 @@ EnvironmentFile=/root/spy-0dte-trader/.env
 ExecStart=/usr/bin/python3 /root/spy-0dte-trader/hermes_system/kill_switch.py
 Restart=always
 RestartSec=10
-StandardOutput=journal
-StandardError=journal
 
 [Install]
 WantedBy=multi-user.target

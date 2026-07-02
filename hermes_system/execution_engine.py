@@ -10,6 +10,7 @@ naked leg. Supervised by systemd (hermes-engine.service).
 import sys
 sys.path.insert(0, '/root/spy-0dte-trader')
 
+import fcntl
 import json
 import logging
 import os
@@ -86,18 +87,23 @@ logging.basicConfig(
 )
 log = logging.getLogger('hermes.execution')
 
-# ── Tradier PRODUCTION (LIVE real-money account) ────────────────────────────────
-# GO-LIVE June 22 2026: order submission, balances, positions and fills all run
-# against the live api.tradier.com endpoint and the real account. The quotes/data
-# feed in core.data_feeds already uses api.tradier.com and is unchanged.
-PROD_BASE    = 'https://api.tradier.com/v1'
-PROD_KEY     = os.getenv('TRADIER_API_KEY', '')
-PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
+# ── Tradier mode switch (PHASE 1 PAUSE June 30 2026: insufficient capital for
+# Level 3/margin spreads — reverted to sandbox paper mode until funded to $2k) ──
+HERMES_MODE = os.getenv('HERMES_MODE', 'paper')  # 'paper' or 'live'
+
+if HERMES_MODE == 'live':
+    PROD_BASE    = 'https://api.tradier.com/v1'
+    PROD_KEY     = os.getenv('TRADIER_API_KEY', '')
+    PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
+else:
+    PROD_BASE    = 'https://sandbox.tradier.com/v1'
+    PROD_KEY     = os.getenv('TRADIER_SANDBOX_KEY', '')
+    PROD_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
 
 # ── Risk ───────────────────────────────────────────────────────────────────────
 # PHASE 1 LIVE ($1,000 capital): 1 contract per strategy, max loss $200/contract.
 MAX_LOSS_PER_CONTRACT = 200.0
-MAX_DAILY_LOSS        = 150.0     # LIVE daily stop — halts ALL new entries for the day
+MAX_DAILY_LOSS        = 150.0 if HERMES_MODE == 'live' else 5000.0  # paper mode sized for ~$99k sandbox balance
 
 # ── Credit gate (BUG 4 / June 22 live fix) ──────────────────────────────────────
 # The old hardcoded $0.20 floor filtered out every valid entry at VIX 16.x, where
@@ -145,6 +151,21 @@ ROLLBACK_ALERT_COOLDOWN = 600.0  # 10 minutes
 BLACKLIST_REJECT_THRESHOLD = 3                    # consecutive buy_to_open rejects
 BLACKLIST_REJECT_WINDOW    = timedelta(minutes=10)  # ...within this window
 BLACKLIST_DURATION         = timedelta(minutes=30)  # ...blacklists the strike this long
+
+# ── Pre-flight scheduling (audit H2) ───────────────────────────────────────────
+# Pre-flight runs at/after 09:25 ET — never at startup or the midnight daily
+# reset, where ThetaData is routinely inside its overnight reset window (every
+# "04:00" failure in execution.log was midnight ET rendered in UTC). A failed
+# pre-flight is retried on this interval until the close instead of silently
+# blocking entries for the whole day (June 29: one midnight failure paused
+# entries until a manual 09:47 restart).
+PREFLIGHT_RETRY_SECS = 600.0
+
+# ── Quote-freeze alerting (audit H5) ───────────────────────────────────────────
+# A missing leg quote freezes a position's value at entry credit, which by
+# construction can trigger NEITHER the profit target nor the stop. Page
+# Telegram after this many consecutive frozen loops (and every 30 thereafter).
+QUOTE_FREEZE_ALERT_LOOPS = 3
 
 ET = pytz.timezone('America/New_York')
 
@@ -486,6 +507,38 @@ def parse_occ(option_symbol: str) -> Tuple[str, str, str, float]:
     return option_symbol[:-15], tail[:6], tail[6], int(tail[7:]) / 1000.0
 
 
+# ── Single-instance lock (audit H3) ────────────────────────────────────────────
+# July 1: a stray manually-launched engine (still holding LIVE creds loaded
+# before the paper revert) ran alongside the systemd instance — two engines
+# means duplicate orders. The unit's ExecStartPre only kills `screen` sessions,
+# so the engine itself must refuse to start when another instance is running.
+ENGINE_LOCK_FILE = HERMES_ROOT / 'engine.lock'
+
+
+def _acquire_engine_lock() -> int:
+    """Take an exclusive flock on ENGINE_LOCK_FILE; exit if another engine
+    holds it. The returned fd must stay open (and referenced) for the process
+    lifetime — closing it releases the lock."""
+    fd = os.open(str(ENGINE_LOCK_FILE), os.O_CREAT | os.O_RDWR)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError:
+        holder = ''
+        try:
+            holder = os.read(fd, 32).decode(errors='replace').strip()
+        except Exception:
+            pass
+        os.close(fd)
+        log.critical('Another execution_engine instance is already running%s — exiting.',
+                     f' (lock held by PID {holder})' if holder else '')
+        tg_send('🚨 HERMES: second engine start BLOCKED — another instance already holds '
+                'the engine lock. Duplicate engines cause duplicate orders.')
+        sys.exit(1)
+    os.ftruncate(fd, 0)
+    os.write(fd, str(os.getpid()).encode())
+    return fd
+
+
 # ── Engine ─────────────────────────────────────────────────────────────────────
 
 class HermesEngine:
@@ -506,6 +559,13 @@ class HermesEngine:
         self.preflight_ok: bool = False
         self._preflight_fail_reason: str = ''     # FIX 4: reason for last pre-flight failure
         self._preflight_alert_sent: bool = False  # FIX 4: Telegram alert sent at 09:35 today
+        # Audit H2: pre-flight is scheduled by _maybe_preflight — pending until
+        # the first run at/after 09:25 ET, then retried on failure every
+        # PREFLIGHT_RETRY_SECS until the close.
+        self._preflight_pending: bool = True
+        self._last_preflight_at: float = 0.0
+        # Audit H5: consecutive quote-freeze loop count per strategy.
+        self._freeze_counts: Dict[str, int] = {}
         # FIX 3: last time a rollback Telegram alert was sent, per strategy.
         self.last_rollback_alert: Dict[str, float] = {}
         # FIX 1: retry-loop backoff. order_blacklist maps an option symbol to the
@@ -547,21 +607,20 @@ class HermesEngine:
         # knowledge base also lists R3C, T5, and T6, which exist there but are
         # NOT implemented in STRATEGIES — reconcile before deploying them.
         n = len(STRATEGIES)
-        log.info('LIVE MODE — production account %s', PROD_ACCOUNT or '(unset)')
+        mode_label = 'LIVE MODE — production account' if HERMES_MODE == 'live' else 'PAPER MODE — sandbox account'
+        log.info('%s %s', mode_label, PROD_ACCOUNT or '(unset)')
         log.info('Hermes Engine starting — %d strategies active. Daily loss limit $%.0f, 1 contract/strategy.',
                  n, MAX_DAILY_LOSS)
         log.info('Closing at 50%% profit target (was 75%%)')
-        tg_send(f'🚀 Hermes Engine started — LIVE account {PROD_ACCOUNT} — {n} strategies, '
-                f'$150 daily loss limit, 1 contract each.')
-        # FIX 2: skip pre-flight until 09:25 ET to avoid ThetaData 04:00 ET daily reset.
-        _now_et = datetime.now(ET)
-        if (_now_et.hour, _now_et.minute) < (9, 25):
-            _wait = (_now_et.replace(hour=9, minute=25, second=0, microsecond=0) - _now_et).total_seconds()
-            log.info('Pre-market: sleeping %.0fs until 09:25 ET before pre-flight.', _wait)
-            time.sleep(max(0.0, _wait))
-        # Item 6: pre-flight before any trading. A failure pauses entries (sets
-        # preflight_ok=False) but does not stop the loop, so exits keep running.
-        self._preflight()
+        acct_label = 'LIVE account' if HERMES_MODE == 'live' else 'PAPER/sandbox account'
+        tg_send(f'🚀 Hermes Engine started — {acct_label} {PROD_ACCOUNT} — {n} strategies, '
+                f'${MAX_DAILY_LOSS:.0f} daily loss limit, 1 contract each.')
+        # FIX 2 / audit H2: pre-flight is scheduled by _maybe_preflight inside the
+        # main loop — first run at/after 09:25 ET (outside ThetaData's overnight
+        # reset window), retried on failure every PREFLIGHT_RETRY_SECS. No
+        # pre-market sleep: the loop starts immediately, so the heartbeat stays
+        # fresh and open positions are monitored from the first iteration.
+        log.info('Pre-flight scheduled for >=09:25 ET (audit H2 — no startup/midnight runs).')
         try:
             self._run_loop()
         except Exception as exc:
@@ -579,6 +638,7 @@ class HermesEngine:
             if now.date() != self.today:
                 self._reset_daily()
             self._touch_heartbeat(now)
+            self._maybe_preflight(now)  # audit H2: runs/retries pre-flight from 09:25 ET
             if not self._is_market_hours(now):
                 time.sleep(60)
                 continue
@@ -588,8 +648,9 @@ class HermesEngine:
             quotes = self.feeds.get_tradier_quotes(self._batch_quote_symbols())
             ms = self._get_market_state(now, quotes)
             # Item 2: log current daily P&L against the limit every loop.
-            log.info('Daily P&L: $%.2f / limit -$%.2f', self.total_pnl, MAX_DAILY_LOSS)
-            self._check_entries(ms, now)
+            log.info('Daily P&L: $%.2f realized, $%.2f open / limit -$%.2f',
+                     self.total_pnl, self._unrealized_pnl(quotes), MAX_DAILY_LOSS)
+            self._check_entries(ms, now, quotes)
             self._check_exits(ms, now, quotes)
             time.sleep(60)
 
@@ -830,6 +891,28 @@ class HermesEngine:
             d += timedelta(days=1)
         return d
 
+    def _maybe_preflight(self, now: datetime) -> None:
+        """Audit H2: sole scheduler for _preflight. Runs it once at/after 09:25
+        ET on trading days (deferred from startup and the midnight daily reset,
+        where ThetaData is routinely down), then retries a FAILED pre-flight
+        every PREFLIGHT_RETRY_SECS until the close — a transient morning outage
+        no longer silently blocks entries for the whole day."""
+        d = now.date()
+        if now.weekday() >= 5 or d in MARKET_HOLIDAYS_2026:
+            return
+        t = (now.hour, now.minute)
+        if t < (9, 25) or t > (16, 0):
+            return
+        if self._preflight_pending:
+            self._preflight_pending = False
+            self._last_preflight_at = time.monotonic()
+            self._preflight()
+        elif (not self.preflight_ok
+                and time.monotonic() - self._last_preflight_at >= PREFLIGHT_RETRY_SECS):
+            log.info('Pre-flight retry (last failure: %s).', self._preflight_fail_reason)
+            self._last_preflight_at = time.monotonic()
+            self._preflight()
+
     def _preflight(self) -> None:
         """Item 6: verify the live trading stack before any entries are allowed.
         Checks (1) production API auth, (2) account balance >= $500, (3) ThetaData
@@ -906,7 +989,8 @@ class HermesEngine:
 
     # ── Entry gate ────────────────────────────────────────────────────────────
 
-    def _check_entries(self, ms: dict, now: datetime) -> None:
+    def _check_entries(self, ms: dict, now: datetime,
+                       quotes: Optional[Dict[str, dict]] = None) -> None:
         # Item 6: never enter while pre-flight is failing (API/balance/data/VIX).
         if not self.preflight_ok:
             # FIX 4: one Telegram alert at/after 09:35 ET with VIX and regime context.
@@ -921,7 +1005,7 @@ class HermesEngine:
             return
         if not self._check_term_structure():
             return
-        if not self._total_loss_ok():
+        if not self._total_loss_ok(quotes):
             # Item 2: page Telegram once, then keep blocking entries for the day.
             if not self._daily_limit_alerted:
                 tg_send(f'⛔ DAILY LOSS LIMIT HIT — no more entries today. P&L: ${self.total_pnl:.2f}')
@@ -1487,21 +1571,41 @@ class HermesEngine:
                 remaining.append(pos)
         self.positions = remaining
         self._save_positions()
-        # At 15:58 sweep Tradier for any positions still open (catches crash-restart gaps).
-        if (now.hour, now.minute) >= (15, 58) and not self._sweep_done:
+        # At 15:58 (12:58 on early-close days — audit H6) sweep Tradier for any
+        # positions still open (catches crash-restart gaps).
+        sweep_at = (12, 58) if now.date() in EARLY_CLOSE_2026 else (15, 58)
+        if (now.hour, now.minute) >= sweep_at and not self._sweep_done:
             self._tradier_force_exit_sweep(now)
             self._sweep_done = True
 
-    def _current_value(self, pos: Position, quotes: Dict[str, dict]) -> float:
+    def _note_quote_freeze(self, pos: Position, symbol: str) -> None:
+        """Audit H5: a frozen position (missing leg quote → value pinned at entry
+        credit) can trigger NEITHER the profit target nor the stop, so it rides
+        unmanaged until force-exit. Log every freeze; page Telegram after
+        QUOTE_FREEZE_ALERT_LOOPS consecutive frozen loops (and every 30 after)."""
+        n = self._freeze_counts.get(pos.strategy, 0) + 1
+        self._freeze_counts[pos.strategy] = n
+        log.warning('%s: no quote for %s in batch — freezing value at entry credit '
+                    '(consecutive loop %d). Stop-loss NOT evaluated while frozen.',
+                    pos.strategy, symbol, n)
+        if n == QUOTE_FREEZE_ALERT_LOOPS or (n > QUOTE_FREEZE_ALERT_LOOPS and n % 30 == 0):
+            tg_send(f'🚨 HERMES {pos.strategy}: leg {symbol} has had no quote for '
+                    f'{n} consecutive loops — stop-loss is NOT being evaluated. '
+                    f'Position is unmanaged until quotes return or force-exit.')
+
+    def _current_value(self, pos: Position, quotes: Dict[str, dict],
+                       note_freeze: bool = True) -> float:
         """Debit-to-close for spreads; current mid for long (earnings) positions.
-        Leg quotes come from the per-loop batched fetch (R1) — no extra calls."""
+        Leg quotes come from the per-loop batched fetch (R1) — no extra calls.
+        note_freeze=False (audit M4 mark-to-market path) computes the same value
+        without touching the H5 freeze counters, which belong to the exit path."""
         try:
             total = 0.0
             for leg in pos.legs:
                 q = quotes.get(leg.option_symbol)
                 if not q:
-                    log.warning('%s: no quote for %s in batch — freezing value at entry credit.',
-                                pos.strategy, leg.option_symbol)
+                    if note_freeze:
+                        self._note_quote_freeze(pos, leg.option_symbol)
                     return abs(pos.entry_credit)
                 if leg.side == 'sell_to_open':
                     total += q.get('ask', 0.0)  # cost to buy back short
@@ -1510,6 +1614,9 @@ class HermesEngine:
                         total = (q.get('bid', 0.0) + q.get('ask', 0.0)) / 2.0
                     else:
                         total -= q.get('bid', 0.0)  # proceeds from selling long
+            if note_freeze:
+                # Full quote coverage this loop — end any freeze streak.
+                self._freeze_counts.pop(pos.strategy, None)
             return round(total, 2)
         except Exception as exc:
             log.warning('current_value error: %s', exc)
@@ -1517,7 +1624,12 @@ class HermesEngine:
 
     def _exit_reason(self, pos: Position, val: float, now: datetime) -> str:
         t = (now.hour, now.minute)
-        if t >= pos.force_exit:
+        force_at = pos.force_exit
+        if now.date() in EARLY_CLOSE_2026:
+            # Audit H6: on 1PM-close days the loop stops iterating at 13:00, so
+            # a 15:45 force-exit is unreachable — pull it in to close-15min.
+            force_at = min(force_at, (12, 45))
+        if t >= force_at:
             return 'force_exit'
         if pos.spread_type == 'earnings':
             if pos.s4_exit_date and now.date() >= pos.s4_exit_date:
@@ -2156,8 +2268,12 @@ class HermesEngine:
         self._preflight_fail_reason = ''     # FIX 4: reset for new day
         self._preflight_alert_sent  = False  # FIX 4: reset for new day
         log.info('Daily reset: %s', self.today)
-        # Item 6: re-run pre-flight at the start of each new trading day.
-        self._preflight()
+        # Item 6 / audit H2: DEFER pre-flight to 09:25 ET via _maybe_preflight.
+        # Running it here fired at midnight ET (logged as 04:00 UTC) inside
+        # ThetaData's overnight reset window, and a failure was never retried —
+        # silently blocking entries for the entire day (June 29 incident).
+        self.preflight_ok = False
+        self._preflight_pending = True
         self._load_sma5_bias()
 
     def _strategy_already_open(self, name: str, open_syms: set) -> bool:
@@ -2187,8 +2303,26 @@ class HermesEngine:
         limit = (cfg.contracts if cfg else 1) * MAX_LOSS_PER_CONTRACT
         return self.daily_pnl.get(name, 0.0) > -limit
 
-    def _total_loss_ok(self) -> bool:
-        return self.total_pnl > -MAX_DAILY_LOSS
+    def _unrealized_pnl(self, quotes: Dict[str, dict]) -> float:
+        """Audit M4: mark-to-market P&L of open positions from the per-loop
+        quote batch. A position with a missing leg quote values at entry credit
+        (H5 freeze) and contributes $0 — never a fabricated gain or loss."""
+        total = 0.0
+        for pos in self.positions:
+            val = self._current_value(pos, quotes, note_freeze=False)
+            if pos.spread_type == 'earnings':
+                total += (val - abs(pos.entry_credit)) * 100 * pos.contracts
+            else:
+                total += (pos.entry_credit - val) * 100 * pos.contracts
+        return round(total, 2)
+
+    def _total_loss_ok(self, quotes: Optional[Dict[str, dict]] = None) -> bool:
+        """Audit M4: the daily loss limit counts realized P&L PLUS open
+        drawdown — realized-only allowed several losing open positions to keep
+        admitting new entries far past the $150 limit. Open gains are NOT
+        credited (min(mtm, 0)): winners can evaporate, so only losses count."""
+        mtm = self._unrealized_pnl(quotes or {})
+        return (self.total_pnl + min(mtm, 0.0)) > -MAX_DAILY_LOSS
 
     def _is_market_hours(self, now: datetime) -> bool:
         today = now.date()
@@ -2215,4 +2349,5 @@ class HermesEngine:
 
 
 if __name__ == '__main__':
+    _engine_lock_fd = _acquire_engine_lock()  # audit H3: keep fd referenced for process lifetime
     HermesEngine().run()

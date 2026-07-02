@@ -38,9 +38,20 @@ POSITIONS_FILE = Path('/root/hermes_system/positions.json')
 LOG_FILE       = Path('/root/hermes_system/logs/emergency_close.log')
 LOG_FILE.parent.mkdir(parents=True, exist_ok=True)
 
-PROD_BASE    = 'https://api.tradier.com/v1'
-PROD_KEY     = os.getenv('TRADIER_API_KEY', '')
-PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
+# Audit H1: target the SAME account the engine trades. The endpoint was
+# hardcoded to production while the engine switches on HERMES_MODE — a kill
+# switch fired in paper mode would have hit the funded live account and left
+# the actual sandbox positions open.
+HERMES_MODE = os.getenv('HERMES_MODE', 'paper')  # 'paper' or 'live'
+
+if HERMES_MODE == 'live':
+    PROD_BASE    = 'https://api.tradier.com/v1'
+    PROD_KEY     = os.getenv('TRADIER_API_KEY', '')
+    PROD_ACCOUNT = os.getenv('TRADIER_ACCOUNT_ID', '')
+else:
+    PROD_BASE    = 'https://sandbox.tradier.com/v1'
+    PROD_KEY     = os.getenv('TRADIER_SANDBOX_KEY', '')
+    PROD_ACCOUNT = os.getenv('TRADIER_SANDBOX_ACCOUNT_ID', '')
 HDRS         = {'Authorization': f'Bearer {PROD_KEY}', 'Accept': 'application/json'}
 
 # Match the engine's order-tracking constants (audit C5 / sandbox fill-lag rule).
@@ -63,6 +74,42 @@ def _occ_root(option_symbol: str) -> str:
     fixed 15-char OCC tail (YYMMDD + C/P + 8-digit strike). A naive slice like
     symbol[:3] mangles NVDA/AAPL/GOOGL and gets rejected (audit D8)."""
     return option_symbol[:-15] if len(option_symbol) > 15 else option_symbol
+
+
+def _is_occ_option(symbol: str) -> bool:
+    """True if symbol has the fixed 15-char OCC tail (YYMMDD + C/P + strike)."""
+    if len(symbol) < 16:
+        return False
+    tail = symbol[-15:]
+    return tail[6] in ('C', 'P') and tail[:6].isdigit() and tail[7:].isdigit()
+
+
+def _fetch_broker_positions():
+    """{symbol: quantity} for every open position at the broker, or None when
+    the positions endpoint could not be read. Audit C2: None ≠ {} — a failed
+    fetch must never be treated as 'nothing open'."""
+    try:
+        r = requests.get(f'{PROD_BASE}/accounts/{PROD_ACCOUNT}/positions',
+                         headers=HDRS, timeout=15)
+    except Exception as exc:
+        log.error('Broker positions fetch error: %s', exc)
+        return None
+    if not r.ok:
+        log.error('Broker positions fetch failed HTTP %d: %s', r.status_code, r.text[:160])
+        return None
+    positions = (r.json() or {}).get('positions')
+    if not positions or positions == 'null':
+        return {}
+    pos_list = positions.get('position', [])
+    if isinstance(pos_list, dict):
+        pos_list = [pos_list]
+    out = {}
+    for p in pos_list:
+        try:
+            out[p['symbol']] = int(p.get('quantity', 0))
+        except (KeyError, TypeError, ValueError):
+            log.warning('Unparseable broker position entry: %r', p)
+    return out
 
 
 def _load_short_legs():
@@ -132,20 +179,53 @@ def _await_fill(order_id) -> dict:
 
 
 def main() -> int:
-    log.info('=== EMERGENCY CLOSE invoked (account %s) ===', PROD_ACCOUNT or '(unset)')
+    log.info('=== EMERGENCY CLOSE invoked (%s mode, account %s) ===',
+             HERMES_MODE.upper(), PROD_ACCOUNT or '(unset)')
 
     if not PROD_KEY or not PROD_ACCOUNT:
         log.error('Tradier production creds missing — CANNOT close positions. CHECK MANUALLY.')
         return 1
 
+    # Audit C2: the BROKER is the source of truth for what is open.
+    # positions.json supplies strategy labels and a cross-check only.
     try:
-        shorts = _load_short_legs()
+        tracked = _load_short_legs()
     except Exception:
-        return 1
+        tracked = []          # corrupt positions.json no longer aborts the close
+    strat_by_sym = {sym: strat for sym, _, strat in tracked}
+
+    broker = _fetch_broker_positions()
+    reconciled = broker is not None
+    unclosable = 0
+    if reconciled:
+        shorts = []
+        for sym, qty in broker.items():
+            if qty >= 0:
+                if qty > 0:
+                    log.info('Leaving long position alone (bounded risk): %s x%d', sym, qty)
+                continue
+            if not _is_occ_option(sym):
+                log.error('SHORT NON-OPTION at broker: %s x%d — cannot auto-close, '
+                          'CHECK MANUALLY.', sym, qty)
+                unclosable += 1
+                continue
+            strat = strat_by_sym.get(sym, 'untracked')
+            if strat == 'untracked':
+                log.warning('UNTRACKED short at broker will be closed: %s x%d', sym, abs(qty))
+            shorts.append((sym, abs(qty), strat))
+        for sym in set(strat_by_sym) - {s for s, _, _ in shorts}:
+            log.warning('Tracked short %s not open at broker — already closed/expired, skipping.', sym)
+    else:
+        log.error('Cannot read broker positions — falling back to positions.json legs; '
+                  'exit will be non-zero so the caller raises CHECK-MANUALLY.')
+        shorts = tracked
 
     if not shorts:
-        log.info('No open short legs in positions.json — nothing to close.')
-        return 0
+        if reconciled and unclosable == 0:
+            log.info('No open short option legs at the broker — nothing to close.')
+            return 0
+        log.error('No closable legs identified but state is NOT verified — CHECK MANUALLY.')
+        return 1
 
     log.info('Closing %d short leg(s): %s', len(shorts),
              ', '.join(f'{s}x{q}' for s, q, _ in shorts))
@@ -173,9 +253,10 @@ def main() -> int:
             log.error('  NOT FILLED %s [%s] order %s status=%s — CHECK MANUALLY.',
                       option_symbol, strat, oid, status)
 
-    log.info('=== EMERGENCY CLOSE complete: %d filled, %d failed (of %d short legs) ===',
-             filled, failed, len(shorts))
-    return 0 if failed == 0 else 1
+    log.info('=== EMERGENCY CLOSE complete: %d filled, %d failed (of %d short legs)%s ===',
+             filled, failed, len(shorts),
+             '' if reconciled else ' — BROKER STATE UNVERIFIED')
+    return 0 if (failed == 0 and unclosable == 0 and reconciled) else 1
 
 
 if __name__ == '__main__':
