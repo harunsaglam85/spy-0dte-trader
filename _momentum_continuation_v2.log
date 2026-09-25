@@ -1,0 +1,88 @@
+Loading market data...
+  730 candidate days in [2023-07-01, 2026-05-30]
+  0DTE-volume low+medium days: 423 / 730
+
+====================================================================================================
+  8-CELL GRID: {no-stop, -1% stop} x {SPY-only, cross-sectional} x {unfiltered, volume-filtered}
+====================================================================================================
+  SPY-only  no-stop  unfilt    N=  77  WR=  57.1%  PF=  1.04  Total P&L=$  +291.00
+  SPY-only  no-stop  vol-filt  N=  32  WR=  75.0%  PF=  2.87  Total P&L=$+2,405.00
+  SPY-only  -1%stop  unfilt    N=  77  WR=  57.1%  PF=  1.18  Total P&L=$+1,272.75
+  SPY-only  -1%stop  vol-filt  N=  32  WR=  75.0%  PF=  2.93  Total P&L=$+2,427.98
+  cross-sec no-stop  unfilt    N= 290  WR=  53.4%  PF=  1.00  Total P&L=$    +5.00
+  cross-sec no-stop  vol-filt  N= 156  WR=  57.7%  PF=  1.26  Total P&L=$+2,074.50
+  cross-sec -1%stop  unfilt    N= 290  WR=  53.1%  PF=  0.98  Total P&L=$  -501.36
+  cross-sec -1%stop  vol-filt  N= 156  WR=  57.7%  PF=  1.20  Total P&L=$+1,713.27
+
+====================================================================================================
+  CELLS THAT BEAT THEIR BASELINE (no-stop vs PF 1.04, -1%-stop vs PF 1.18)
+====================================================================================================
+
+  >> SPY-only / no-stop / vol-filtered  PF=2.87 (beats 1.04)  N=32  Total P&L=$+2,405.00
+
+    -- Chronological 70/30 -- (32 signal days, split=22)
+    IS   (2023-09-25 -> 2025-03-24)  N=  22  WR=  68.2%  PF=  3.00  Total P&L=$+1,522.50
+    OOS  (2025-04-02 -> 2026-01-12)  N=  10  WR=  90.0%  PF=  2.69  Total P&L=$  +882.50
+    -- Interleaved odd/even -- (32 trades)
+    EVEN N=  16  WR=  75.0%  PF=  1.35  Total P&L=$  +361.50
+    ODD  N=  16  WR=  75.0%  PF=  8.95  Total P&L=$+2,043.50
+    IS    PF=  3.00  P&L=$+1,522.50  -> PASS
+    OOS   PF=  2.69  P&L=$  +882.50  -> PASS
+    EVEN  PF=  1.35  P&L=$  +361.50  -> PASS
+    ODD   PF=  8.95  P&L=$+2,043.50  -> PASS
+    Clears both validation splits: YES
+
+    Leave-one-day-out (32 distinct signal days): 0/32 single-day removals flip PF<1.0 or P&L<=0.
+    -> Robust to any single-day removal.
+
+  >> SPY-only / -1% stop / vol-filtered  PF=2.93 (beats 1.18)  N=32  Total P&L=$+2,427.98
+
+    -- Chronological 70/30 -- (32 signal days, split=22)
+    IS   (2023-09-25 -> 2025-03-24)  N=  22  WR=  68.2%  PF=  3.00  Total P&L=$+1,522.50
+    OOS  (2025-04-02 -> 2026-01-12)  N=  10  WR=  90.0%  PF=  2.81  Total P&L=$  +905.48
+    -- Interleaved odd/even -- (32 trades)
+    EVEN N=  16  WR=  75.0%  PF=  1.38  Total P&L=$  +384.48
+    ODD  N=  16  WR=  75.0%  PF=  8.95  Total P&L=$+2,043.50
+    IS    PF=  3.00  P&L=$+1,522.50  -> PASS
+    OOS   PF=  2.81  P&L=$  +905.48  -> PASS
+    EVEN  PF=  1.38  P&L=$  +384.48  -> PASS
+    ODD   PF=  8.95  P&L=$+2,043.50  -> PASS
+    Clears both validation splits: YES
+
+    Leave-one-day-out (32 distinct signal days): 0/32 single-day removals flip PF<1.0 or P&L<=0.
+    -> Robust to any single-day removal.
+
+  >> cross-sec / no-stop / vol-filtered  PF=1.26 (beats 1.04)  N=156  Total P&L=$+2,074.50
+
+    -- Chronological 70/30 -- (156 signal days, split=109)
+    IS   (2023-07-17 -> 2025-01-15)  N= 109  WR=  54.1%  PF=  1.05  Total P&L=$  +280.50
+    OOS  (2025-01-22 -> 2026-02-25)  N=  47  WR=  66.0%  PF=  1.89  Total P&L=$+1,794.00
+    -- Interleaved odd/even -- (156 trades)
+    EVEN N=  78  WR=  57.7%  PF=  0.97  Total P&L=$  -143.00
+    ODD  N=  78  WR=  57.7%  PF=  1.67  Total P&L=$+2,217.50
+    IS    PF=  1.05  P&L=$  +280.50  -> PASS
+    OOS   PF=  1.89  P&L=$+1,794.00  -> PASS
+    EVEN  PF=  0.97  P&L=$  -143.00  -> FAIL
+    ODD   PF=  1.67  P&L=$+2,217.50  -> PASS
+    Clears both validation splits: NO
+
+  >> cross-sec / -1% stop / vol-filtered  PF=1.20 (beats 1.18)  N=156  Total P&L=$+1,713.27
+
+    -- Chronological 70/30 -- (156 signal days, split=109)
+    IS   (2023-07-17 -> 2025-01-15)  N= 109  WR=  54.1%  PF=  0.96  Total P&L=$  -280.68
+    OOS  (2025-01-22 -> 2026-02-25)  N=  47  WR=  66.0%  PF=  2.10  Total P&L=$+1,993.95
+    -- Interleaved odd/even -- (156 trades)
+    EVEN N=  78  WR=  57.7%  PF=  0.91  Total P&L=$  -461.76
+    ODD  N=  78  WR=  57.7%  PF=  1.65  Total P&L=$+2,175.03
+    IS    PF=  0.96  P&L=$  -280.68  -> FAIL
+    OOS   PF=  2.10  P&L=$+1,993.95  -> PASS
+    EVEN  PF=  0.91  P&L=$  -461.76  -> FAIL
+    ODD   PF=  1.65  P&L=$+2,175.03  -> PASS
+    Clears both validation splits: NO
+
+====================================================================================================
+  FINAL VERDICT
+====================================================================================================
+  Validated AND robust:
+    - SPY-only / no-stop / vol-filtered: PF=2.87, N=32, Total P&L=$+2,405.00
+    - SPY-only / -1% stop / vol-filtered: PF=2.93, N=32, Total P&L=$+2,427.98

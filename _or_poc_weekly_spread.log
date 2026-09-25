@@ -1,0 +1,54 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+378 naked-option trades on low+medium-volume days (should be 378)
+
+Fetching short leg (~3 strikes OTM) for each trade (cache-first, new API calls where not cached)...
+  50/378  (api_calls=0, api_time=0.0s, elapsed=0.8s)
+  100/378  (api_calls=0, api_time=0.0s, elapsed=1.7s)
+  150/378  (api_calls=0, api_time=0.0s, elapsed=2.6s)
+  200/378  (api_calls=0, api_time=0.0s, elapsed=3.4s)
+  250/378  (api_calls=0, api_time=0.0s, elapsed=4.2s)
+  300/378  (api_calls=0, api_time=0.0s, elapsed=5.2s)
+  350/378  (api_calls=0, api_time=0.0s, elapsed=6.2s)
+
+378/378 spread trades built (api_calls=21, api_time=10.0s)
+Wrote -> C:\Users\sagla\spy-0dte-trader\trades_weekly_spread_lowmedvol.csv
+
+==========================================================================================
+  SPREAD vs NAKED (low+medium-volume days, stop=$0.05)
+==========================================================================================
+  NAKED   N= 378  WR=  38.1%  PF=  1.36  Total P&L=$ +3,139.00  AvgWin=$  82.53  AvgLoss=$  -37.37
+  SPREAD  N= 378  WR=  36.2%  PF=  0.79  Total P&L=$   -807.00  AvgWin=$  22.72  AvgLoss=$  -16.27
+
+==========================================================================================
+  ROUND-TRIP SPREAD COST AS % OF DEBIT PAID
+==========================================================================================
+  NAKED option (entry ask + exit bid/ask round trip, as % of entry ask):  1.78%  (n=378)
+  SPREAD (net round-trip spread cost across both legs, as % of net debit): 3.61%  (n=378)
+
+  Spread beats/matches naked on PF or P&L: NO -> skipping validation splits

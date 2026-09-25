@@ -1,0 +1,61 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+  572 original trades at stop=$0.05
+
+Building daily 0DTE options volume from cached theta_SPY_*.pkl chains...
+  635/730 days with a nonzero real 0DTE volume figure
+  Tercile cutoffs: low <4,198,228  mid <5,416,554  high >=  that
+
+==========================================================================================
+  OR/POC WEEKLY (stop=$0.05) BY 0DTE-VOLUME TERCILE
+==========================================================================================
+  ALL      N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00
+  (572/572 trades fall on a day with volume data)
+  LOW      N= 190  WR=  37.9%  PF=  1.36  Total P&L=$ +1,271.00  AvgWin=$  66.10  AvgLoss=$  -29.56
+  MEDIUM   N= 188  WR=  38.3%  PF=  1.36  Total P&L=$ +1,868.00  AvgWin=$  98.96  AvgLoss=$  -45.32
+  HIGH     N= 194  WR=  35.6%  PF=  1.00  Total P&L=$    +18.00  AvgWin=$ 145.55  AvgLoss=$  -80.20
+
+==========================================================================================
+  0DTE VOLUME TREND OVER TIME (quarterly average daily volume)
+==========================================================================================
+  2023-Q3   n_days=  9   avg_daily_0DTE_volume=     3,861,263
+  2023-Q4   n_days= 63   avg_daily_0DTE_volume=     3,657,093
+  2024-Q1   n_days= 61   avg_daily_0DTE_volume=     3,862,071
+  2024-Q2   n_days= 63   avg_daily_0DTE_volume=     3,848,476
+  2024-Q3   n_days= 64   avg_daily_0DTE_volume=     4,254,003
+  2024-Q4   n_days= 25   avg_daily_0DTE_volume=     3,920,821
+  2025-Q1   n_days= 60   avg_daily_0DTE_volume=     5,253,398
+  2025-Q2   n_days= 62   avg_daily_0DTE_volume=     5,417,576
+  2025-Q3   n_days= 63   avg_daily_0DTE_volume=     4,703,077
+  2025-Q4   n_days= 64   avg_daily_0DTE_volume=     5,936,906
+  2026-Q1   n_days= 61   avg_daily_0DTE_volume=     6,657,365
+  2026-Q2   n_days= 40   avg_daily_0DTE_volume=     7,165,258
+
+  Avg daily volume before 2025-05-01:      4,242,898  (n=366)
+  Avg daily volume from 2025-05-01 on:      5,875,924  (n=269)
+  Ratio post/pre: 1.38x

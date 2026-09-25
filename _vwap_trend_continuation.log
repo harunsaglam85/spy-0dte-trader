@@ -1,0 +1,113 @@
+Loading market data...
+  730 trading days in [2023-07-01, 2026-05-30]
+
+2 signal-detection configs (tolerance) x 2 stop-buffers x 3 target R:Rs = 12 total combos
+
+[1/2] tolerance=$0.10
+  coverage: {'total_days': 728, 'no_signal': 97, 'signal_days': 614, 'no_weekly_exp': 17}
+    50/614 fetched  (api_calls=68, api_time=2.9s)
+    100/614 fetched  (api_calls=130, api_time=6.2s)
+    150/614 fetched  (api_calls=202, api_time=9.7s)
+    200/614 fetched  (api_calls=273, api_time=12.6s)
+    250/614 fetched  (api_calls=333, api_time=16.0s)
+    300/614 fetched  (api_calls=408, api_time=22.0s)
+    350/614 fetched  (api_calls=480, api_time=41.7s)
+    400/614 fetched  (api_calls=543, api_time=69.3s)
+    450/614 fetched  (api_calls=615, api_time=95.8s)
+    500/614 fetched  (api_calls=688, api_time=126.3s)
+    550/614 fetched  (api_calls=763, api_time=154.2s)
+    600/614 fetched  (api_calls=779, api_time=164.8s)
+  running total: api_calls=779  api_time=164.8s  elapsed=2.9min
+
+[2/2] tolerance=$0.25
+  coverage: {'total_days': 728, 'no_signal': 90, 'signal_days': 621, 'no_weekly_exp': 17}
+    50/621 fetched  (api_calls=822, api_time=166.7s)
+    100/621 fetched  (api_calls=861, api_time=168.5s)
+    150/621 fetched  (api_calls=899, api_time=171.2s)
+    200/621 fetched  (api_calls=938, api_time=173.4s)
+    250/621 fetched  (api_calls=983, api_time=176.3s)
+    300/621 fetched  (api_calls=1023, api_time=178.2s)
+    350/621 fetched  (api_calls=1057, api_time=185.7s)
+    400/621 fetched  (api_calls=1081, api_time=194.6s)
+    450/621 fetched  (api_calls=1121, api_time=212.7s)
+    500/621 fetched  (api_calls=1163, api_time=228.0s)
+    550/621 fetched  (api_calls=1188, api_time=236.7s)
+    600/621 fetched  (api_calls=1195, api_time=241.8s)
+  running total: api_calls=1195  api_time=241.8s  elapsed=4.3min
+
+Total elapsed: 4.3 min, 1195 ThetaData API calls (241.8s of API time)
+
+==========================================================================================
+  ALL 12 COMBOS BY PROFIT FACTOR
+==========================================================================================
+   Tol   StopBuf    RR     N      WR      PF     Total P&L
+  0.25      0.15   3.5   621   31.2%    1.12     +2,247.00
+  0.25      0.15   2.5   621   34.0%    1.04       +759.00
+  0.25      0.05   3.5   621   29.0%    1.04       +651.00
+  0.25      0.05   2.5   621   32.2%    0.99       -141.00
+  0.10      0.15   3.5   614   28.7%    0.98       -285.00
+  0.10      0.05   3.5   614   27.0%    0.93     -1,286.00
+  0.10      0.15   2.5   614   31.4%    0.89     -1,910.00
+  0.25      0.15   1.5   621   40.9%    0.88     -1,958.00
+  0.10      0.05   2.5   614   30.3%    0.86     -2,359.00
+  0.25      0.05   1.5   621   40.9%    0.85     -2,270.00
+  0.10      0.15   1.5   614   40.1%    0.82     -2,931.00
+  0.10      0.05   1.5   614   40.1%    0.79     -2,995.00
+
+Wrote full grid -> C:\Users\sagla\spy-0dte-trader\vtc_grid_results.csv
+
+Best raw combo: tolerance=$0.25 stop_buffer=$0.15 target_rr=3.5
+  N=621 WR=31.2% PF=1.12 Total P&L=$+2,247.00
+
+==========================================================================================
+  VALIDATION SPLITS - RAW best combo (no regime filter)
+==========================================================================================
+
+  -- Chronological 70/30 -- (621 signal days, split=435)
+  IS   (2023-07-03 -> 2025-07-17)  N= 435  WR=  31.0%  PF=  1.12  Total P&L=$ +1,537.00
+  OOS  (2025-07-18 -> 2026-05-29)  N= 186  WR=  31.7%  PF=  1.12  Total P&L=$   +710.00
+
+  -- Interleaved odd/even -- (621 trades)
+  EVEN N= 311  WR=  32.5%  PF=  1.16  Total P&L=$ +1,545.00
+  ODD  N= 310  WR=  30.0%  PF=  1.07  Total P&L=$   +702.00
+
+  -- Pass/fail (PF>=1.0 and positive P&L in every subset) --
+  IS    PF=  1.12  P&L=$+1,537.00  -> PASS
+  OOS   PF=  1.12  P&L=$  +710.00  -> PASS
+  EVEN  PF=  1.16  P&L=$+1,545.00  -> PASS
+  ODD   PF=  1.07  P&L=$  +702.00  -> PASS
+
+  Clears all four splits: YES
+
+==========================================================================================
+  REALIZED-VOL TOP-TERCILE FILTER on best raw combo
+==========================================================================================
+  730 days with valid 20-day rolling RV; top tercile = 243 days
+  UNFILTERED  N= 621  WR=  31.2%  PF=  1.12  Total P&L=$ +2,247.00
+  TOP TERCILE N= 200  WR=  28.5%  PF=  0.93  Total P&L=$   -580.00
+
+==========================================================================================
+  VALIDATION SPLITS - RV top-tercile filtered
+==========================================================================================
+
+  -- Chronological 70/30 -- (200 signal days, split=140)
+  IS   (2023-10-26 -> 2025-05-08)  N= 140  WR=  30.0%  PF=  0.92  Total P&L=$   -513.00
+  OOS  (2025-05-09 -> 2026-04-28)  N=  60  WR=  25.0%  PF=  0.97  Total P&L=$    -67.00
+
+  -- Interleaved odd/even -- (200 trades)
+  EVEN N= 100  WR=  31.0%  PF=  0.92  Total P&L=$   -317.00
+  ODD  N= 100  WR=  26.0%  PF=  0.93  Total P&L=$   -263.00
+
+  -- Pass/fail (PF>=1.0 and positive P&L in every subset) --
+  IS    PF=  0.92  P&L=$  -513.00  -> FAIL
+  OOS   PF=  0.97  P&L=$   -67.00  -> FAIL
+  EVEN  PF=  0.92  P&L=$  -317.00  -> FAIL
+  ODD   PF=  0.93  P&L=$  -263.00  -> FAIL
+
+  Clears all four splits: NO
+
+==========================================================================================
+  FINAL VERDICT
+==========================================================================================
+  Raw best combo validated:         YES
+  RV top-tercile filter validated:  NO

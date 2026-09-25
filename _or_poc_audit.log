@@ -1,0 +1,118 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+  572 weekly trades at stop=$0.05
+
+==========================================================================================
+  2. ODD/EVEN INTERLEAVED SPLIT vs CHRONOLOGICAL 70/30
+==========================================================================================
+  ALL   N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00
+  EVEN  N= 286  WR=  39.9%  PF=  1.33  Total P&L=$ +2,890.00   (trade #0,2,4,...)
+  ODD   N= 286  WR=  34.6%  PF=  1.03  Total P&L=$   +267.00   (trade #1,3,5,...)
+
+  -- same split, by alternating signal DAY instead of trade row --
+  EVEN days  N= 286  WR=  39.9%  PF=  1.33  Total P&L=$ +2,890.00
+  ODD  days  N= 286  WR=  34.6%  PF=  1.03  Total P&L=$   +267.00
+
+==========================================================================================
+  3+4. HAND SPOT-CHECK OF 5 RANDOM TRADES
+==========================================================================================
+
+--- Trade 1: 2024-03-04  CALL  strike=513.0  exp=2024-03-07 (DTE=3) ---
+  RECORDED: or_high=512.49  or_low=512.0  poc=512.24
+  INDEPENDENT (plain min/max, n=15 OR bars): or_high=512.49  or_low=512.00
+  INDEPENDENT POC estimate (different algo, $0.05 buckets): ~512.15   (calc_poc says 512.24 - should be in the same neighborhood, not necessarily identical)
+  OR high/low match: YES
+  Entry 1-min bar @ 10:00: {'t': 1709564400000, 'o': 512.515, 'h': 512.535, 'l': 512.3, 'c': 512.4, 'v': 4827.0}
+  Exit  1-min bar @ 10:15: {'t': 1709565300000, 'o': 512.22, 'h': 512.22, 'l': 512.07, 'c': 512.155, 'v': 1331.0}
+  RECORDED entry_spy=512.5  stop_spy=512.19  target_spy=513.45  exit_spy=512.19  exit_reason=stop (POC-0.05)
+  Exit-bar OHLC consistent with exit_reason 'stop (POC-0.05)': stop_condition_true=True  target_condition_true=False
+  Hand-recomputed target (entry + 3x risk of $0.31): 513.43  (recorded: 513.45)  MISMATCH
+  Raw chain quote AT entry minute 10:00: {'hm': '10:00', 'bid': 2.23, 'ask': 2.25}
+  Raw chain quote AT exit  minute 10:15: {'hm': '10:15', 'bid': 2.11, 'ask': 2.13}
+  RECORDED entry_ask=2.25  entry_bid=2.23  exit_bid=2.11  exit_ask=2.13
+  P&L = (exit_bid - entry_ask) * 100 = (2.11 - 2.25) * 100 = -14.0  (recorded pnl: -14.0)
+
+--- Trade 2: 2025-06-23  CALL  strike=597.0  exp=2025-06-26 (DTE=3) ---
+  RECORDED: or_high=595.74  or_low=593.62  poc=595.53
+  INDEPENDENT (plain min/max, n=15 OR bars): or_high=595.74  or_low=593.62
+  INDEPENDENT POC estimate (different algo, $0.05 buckets): ~595.50   (calc_poc says 595.53 - should be in the same neighborhood, not necessarily identical)
+  OR high/low match: YES
+  Entry 1-min bar @ 09:55: {'t': 1750686900000, 'o': 596.47, 'h': 596.47, 'l': 596.375, 'c': 596.375, 'v': 946.0}
+  Exit  1-min bar @ 12:02: {'t': 1750694520000, 'o': 595.59, 'h': 595.695, 'l': 595.405, 'c': 595.69, 'v': 6742.0}
+  RECORDED entry_spy=596.41  stop_spy=595.48  target_spy=599.2  exit_spy=595.48  exit_reason=stop (POC-0.05)
+  Exit-bar OHLC consistent with exit_reason 'stop (POC-0.05)': stop_condition_true=True  target_condition_true=False
+  Hand-recomputed target (entry + 3x risk of $0.93): 599.2  (recorded: 599.2)  MATCH
+  Raw chain quote AT entry minute 09:55: {'hm': '09:55', 'bid': 3.54, 'ask': 3.56}
+  Raw chain quote AT exit  minute 12:02: {'hm': '12:02', 'bid': 3.17, 'ask': 3.18}
+  RECORDED entry_ask=3.56  entry_bid=3.54  exit_bid=3.17  exit_ask=3.18
+  P&L = (exit_bid - entry_ask) * 100 = (3.17 - 3.56) * 100 = -39.0  (recorded pnl: -39.0)
+
+--- Trade 3: 2024-05-08  CALL  strike=517.0  exp=2024-05-13 (DTE=5) ---
+  RECORDED: or_high=515.89  or_low=515.33  poc=515.62
+  INDEPENDENT (plain min/max, n=14 OR bars): or_high=515.89  or_low=515.33
+  INDEPENDENT POC estimate (different algo, $0.05 buckets): ~515.80   (calc_poc says 515.62 - should be in the same neighborhood, not necessarily identical)
+  OR high/low match: YES
+  Entry 1-min bar @ 09:55: {'t': 1715176500000, 'o': 516.29, 'h': 516.335, 'l': 516.255, 'c': 516.335, 'v': 6277.0}
+  Exit  1-min bar @ 13:30: {'t': 1715189400000, 'o': 516.235, 'h': 516.3, 'l': 516.235, 'c': 516.3, 'v': 1238.0}
+  RECORDED entry_spy=516.3  stop_spy=515.57  target_spy=518.51  exit_spy=516.3  exit_reason=1:30 cutoff
+  Exit-bar OHLC consistent with exit_reason '1:30 cutoff': stop_condition_true=False  target_condition_true=False
+  Hand-recomputed target (entry + 3x risk of $0.73): 518.49  (recorded: 518.51)  MISMATCH
+  Raw chain quote AT entry minute 09:55: {'hm': '09:55', 'bid': 2.16, 'ask': 2.17}
+  Raw chain quote AT exit  minute 13:30: {'hm': '13:30', 'bid': 2.06, 'ask': 2.1}
+  RECORDED entry_ask=2.17  entry_bid=2.16  exit_bid=2.06  exit_ask=2.1
+  P&L = (exit_bid - entry_ask) * 100 = (2.06 - 2.17) * 100 = -11.0  (recorded pnl: -11.0)
+
+--- Trade 4: 2025-06-03  CALL  strike=594.0  exp=2025-06-06 (DTE=3) ---
+  RECORDED: or_high=593.26  or_low=592.06  poc=592.56
+  INDEPENDENT (plain min/max, n=15 OR bars): or_high=593.26  or_low=592.06
+  INDEPENDENT POC estimate (different algo, $0.05 buckets): ~592.90   (calc_poc says 592.56 - should be in the same neighborhood, not necessarily identical)
+  OR high/low match: YES
+  Entry 1-min bar @ 10:25: {'t': 1748960700000, 'o': 593.3, 'h': 593.3, 'l': 593.13, 'c': 593.24, 'v': 1014.0}
+  Exit  1-min bar @ 12:17: {'t': 1748967420000, 'o': 595.88, 'h': 596.11, 'l': 595.88, 'c': 596.1, 'v': 1558.0}
+  RECORDED entry_spy=593.37  stop_spy=592.51  target_spy=595.95  exit_spy=595.95  exit_reason=3:1 target
+  Exit-bar OHLC consistent with exit_reason '3:1 target': stop_condition_true=False  target_condition_true=True
+  Hand-recomputed target (entry + 3x risk of $0.86): 595.95  (recorded: 595.95)  MATCH
+  Raw chain quote AT entry minute 10:25: {'hm': '10:25', 'bid': 3.88, 'ask': 3.89}
+  Raw chain quote AT exit  minute 12:17: {'hm': '12:17', 'bid': 5.39, 'ask': 5.47}
+  RECORDED entry_ask=3.89  entry_bid=3.88  exit_bid=5.39  exit_ask=5.47
+  P&L = (exit_bid - entry_ask) * 100 = (5.39 - 3.89) * 100 = 150.0  (recorded pnl: 150.0)
+
+--- Trade 5: 2025-09-16  PUT  strike=661.0  exp=2025-09-19 (DTE=3) ---
+  RECORDED: or_high=661.7  or_low=660.69  poc=661.36
+  INDEPENDENT (plain min/max, n=15 OR bars): or_high=661.70  or_low=660.69
+  INDEPENDENT POC estimate (different algo, $0.05 buckets): ~661.45   (calc_poc says 661.36 - should be in the same neighborhood, not necessarily identical)
+  OR high/low match: YES
+  Entry 1-min bar @ 10:00: {'t': 1758031200000, 'o': 660.125, 'h': 660.255, 'l': 660.11, 'c': 660.24, 'v': 5975.0}
+  Exit  1-min bar @ 13:30: {'t': 1758043800000, 'o': 660.22, 'h': 660.24, 'l': 660.18, 'c': 660.18, 'v': 1512.0}
+  RECORDED entry_spy=660.29  stop_spy=661.41  target_spy=656.93  exit_spy=660.18  exit_reason=1:30 cutoff
+  Exit-bar OHLC consistent with exit_reason '1:30 cutoff': stop_condition_true=False  target_condition_true=False
+  Hand-recomputed target (entry - 3x risk of $1.12): 656.93  (recorded: 656.93)  MATCH
+  Raw chain quote AT entry minute 10:00: {'hm': '10:00', 'bid': 4.72, 'ask': 4.74}
+  Raw chain quote AT exit  minute 13:30: {'hm': '13:30', 'bid': 4.72, 'ask': 4.74}
+  RECORDED entry_ask=4.74  entry_bid=4.72  exit_bid=4.72  exit_ask=4.74
+  P&L = (exit_bid - entry_ask) * 100 = (4.72 - 4.74) * 100 = -2.0  (recorded pnl: -2.0)

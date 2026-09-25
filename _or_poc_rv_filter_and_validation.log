@@ -1,0 +1,61 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+  572 original (unfiltered) trades at stop=$0.05
+
+730 days with a valid 20-day rolling RV in [2023-07-01, 2026-05-30]
+Median RV: 11.85%  -> 365 days above median
+Top tercile: RV >= 13.43%  -> 243 days
+
+==========================================================================================
+  REALIZED-VOL FILTERS ON OR/POC WEEKLY (stop=$0.05)
+==========================================================================================
+  UNFILTERED       N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00  AvgWin=$ 102.94  AvgLoss=$  -52.28
+  ABOVE MEDIAN     N= 297  WR=  37.0%  PF=  1.22  Total P&L=$ +2,512.00  AvgWin=$ 126.70  AvgLoss=$  -61.10
+  TOP TERCILE      N= 197  WR=  39.6%  PF=  1.31  Total P&L=$ +2,390.00  AvgWin=$ 129.46  AvgLoss=$  -64.77
+
+  Better performer: TOP TERCILE (PF=1.31, P&L=$+2,390.00) -> running both validation splits on this one
+
+==========================================================================================
+  VALIDATION SPLITS on TOP TERCILE filter
+==========================================================================================
+
+  -- Chronological 70/30 -- (197 signal days, split=138)
+  IS   (2023-10-26 -> 2025-05-13)  N= 138  WR=  41.3%  PF=  1.57  Total P&L=$ +2,842.00
+  OOS  (2025-05-14 -> 2026-04-28)  N=  59  WR=  35.6%  PF=  0.83  Total P&L=$   -452.00
+
+  -- Interleaved odd/even -- (197 trades)
+  EVEN N=  99  WR=  43.4%  PF=  1.44  Total P&L=$ +1,706.00
+  ODD  N=  98  WR=  35.7%  PF=  1.18  Total P&L=$   +684.00
+
+  -- Pass/fail (PF>=1.0 and positive P&L in every subset) --
+  IS    PF=  1.57  P&L=$+2,842.00  -> PASS
+  OOS   PF=  0.83  P&L=$  -452.00  -> FAIL
+  EVEN  PF=  1.44  P&L=$+1,706.00  -> PASS
+  ODD   PF=  1.18  P&L=$  +684.00  -> PASS
+
+  Clears all four splits: NO

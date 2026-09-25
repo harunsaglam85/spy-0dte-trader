@@ -1,0 +1,72 @@
+Loading market data...
+
+730 days with a valid 20-day rolling RV in [2023-07-01, 2026-05-30]
+Low tercile: 243 days, rolling RV <= 10.41% (range 5.41% - 10.41%)
+Low-vol days span 2023-07-03 -> 2026-05-29
+
+==========================================================================================
+  A) VWAP REVERSION -- baseline (all days) vs low-RV-tercile days
+==========================================================================================
+  Baseline: 730 candidate days
+  542 signal days -> fetching real intraday quotes (cache-first, one call/day covering entry->13:30)...
+    50/542 fetched  (api_calls=0, api_time=0.0s)
+    100/542 fetched  (api_calls=0, api_time=0.0s)
+    150/542 fetched  (api_calls=0, api_time=0.0s)
+    200/542 fetched  (api_calls=0, api_time=0.0s)
+    250/542 fetched  (api_calls=0, api_time=0.0s)
+    300/542 fetched  (api_calls=0, api_time=0.0s)
+    350/542 fetched  (api_calls=0, api_time=0.0s)
+    400/542 fetched  (api_calls=0, api_time=0.0s)
+    450/542 fetched  (api_calls=0, api_time=0.0s)
+    500/542 fetched  (api_calls=0, api_time=0.0s)
+  Low-vol:  243 candidate days
+  173 signal days -> fetching real intraday quotes (cache-first, one call/day covering entry->13:30)...
+    50/173 fetched  (api_calls=0, api_time=0.0s)
+    100/173 fetched  (api_calls=0, api_time=0.0s)
+    150/173 fetched  (api_calls=0, api_time=0.0s)
+
+    stop   BASE N      WR      PF          P&L   ||    LOWVOL N      WR      PF          P&L
+  $0.05      518   36.9%    0.80   -1,222.00   ||         165   34.5%    0.69     -571.00
+  $0.10      518   37.8%    0.77   -1,563.00   ||         165   37.0%    0.68     -616.00
+  $0.15      518   38.6%    0.76   -1,710.00   ||         165   36.4%    0.62     -829.00
+  $0.25      518   41.1%    0.73   -2,245.00   ||         165   40.0%    0.63     -850.00
+  $0.50      518   47.1%    0.69   -3,131.00   ||         165   47.3%    0.61   -1,092.00
+
+==========================================================================================
+  B) OR/POC FAILED BREAKOUTS on low-RV days -- would a fade-to-VWAP have worked?
+==========================================================================================
+  Rebuilding OR/POC weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+  572 total OR/POC trades (stop=$0.05); 87 of them are stopped-out failures on a low-RV day
+
+  87 failed trades had a computable VWAP-at-failure reference
+  7 of those had VWAP on the correct side to fade toward (the rest: price already past/at VWAP when OR/POC stopped out, no fade room)
+  7 of 7 directionally-valid fades reached VWAP before the 1:30 cutoff -> 100.0%
+  Avg distance from failure point to VWAP target: $0.08  (underlying points)
+
+  NOTE: this is a price-level feasibility check (did SPY reach the VWAP level),
+  not a full option-priced fade simulation with real bid/ask fills.

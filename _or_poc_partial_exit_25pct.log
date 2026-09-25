@@ -1,0 +1,50 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+  572 original trades at stop=$0.05
+
+==========================================================================================
+  ORIGINAL (hold to target/stop) vs PARTIAL-EXIT-AT-25%-OF-TARGET
+==========================================================================================
+  ORIGINAL  N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00  AvgWin=$ 102.94  AvgLoss=$  -52.28
+  PARTIAL   N= 572  WR=  53.8%  PF=  0.75  Total P&L=$ -3,457.00  AvgWin=$  34.39  AvgLoss=$  -53.22
+
+==========================================================================================
+  COST TO ORIGINALLY-WINNING TRADES
+==========================================================================================
+  213 trades were winners in the original (hold-to-target/stop) run
+  206 of those were cut short by the 25% partial-exit rule
+  7 of those exited the same way under the new rule (e.g. hit stop/cutoff before ever reaching 25% - contradiction check, should be ~0)
+  Original P&L from those 206 trades: $+21,807.00
+  New      P&L from those 206 trades: $ +6,718.00
+  P&L given up specifically by cutting these winners short: $-15,089.00
+
+  For context - the other side of the ledger:
+  107 originally-LOSING trades became winners under the new rule (previously reached >=25% before reversing into the stop)
+  P&L gained from those flips: $ +8,363.00
+
+  Net change vs original: $ -6,614.00  (cost from cut-short winners $-15,089.00  +  gain from flipped losers $+8,363.00)

@@ -48,12 +48,21 @@ except ImportError:
     REQUESTS_OK = False
 
 BASE        = Path('/root/spy-0dte-trader')
+if not BASE.exists():
+    # Local Windows dev box: fall back to this script's own directory.
+    BASE = Path(__file__).resolve().parent
 DATA_DIR    = BASE / 'backtest_data'
+if not DATA_DIR.exists():
+    # Locally the shared data cache lives one level up, at C:\Users\sagla\backtest_data.
+    DATA_DIR = BASE.parent / 'backtest_data'
 RESEARCH    = BASE / 'hermes_research'
 JOURNAL     = RESEARCH / 'journal_r2.md'
 RESULTS_DIR = RESEARCH / 'results_r2'
 RESEARCH.mkdir(exist_ok=True)
 RESULTS_DIR.mkdir(exist_ok=True)
+# All pickle files loaded below (backtest_data/*.pkl) are self-written local
+# caches from this project's own data-fetch scripts, not from an untrusted
+# source, so the arbitrary-code-execution risk of pickle.load does not apply.
 
 def _load_env():
     env = {}
@@ -107,6 +116,10 @@ def load_spy_daily():
 
 def load_spy_5min():
     with (DATA_DIR / 'spy_5min_2021-01-04_2026-05-30.pkl').open('rb') as f:
+        return pickle.load(f)
+
+def load_spy_1min():
+    with (DATA_DIR / 'spy_1min_alpaca_2021-01-04_2026-05-30.pkl').open('rb') as f:
         return pickle.load(f)
 
 def get_theta_exps():
@@ -810,6 +823,1910 @@ def run_r7_or_breakout(spy_5min, spy_daily, vix_daily, exps, dates):
 
 
 # ══════════════════════════════════════════════════════════════════════════════
+# R7-POC-RR3 — Opening Range + Point-of-Control breakout, fixed 3:1 R:R
+# Extends R7: 15-min OR (not 30-min), stop pinned to the OR's volume POC ± 2
+# ticks instead of a flat option-premium multiple, target fixed at 3x that
+# underlying-price risk. Entry/exit option pricing uses IV calibrated from
+# real ThetaData EOD quotes (theta_SPY_*.pkl) where cached, not the vix/100
+# proxy the rest of this file uses — see calibrate_iv_theta().
+#
+# IMPORTANT DATA CAVEAT: theta_SPY_*.pkl only has ONE EOD-style quote per
+# (obs_date, strike, right) — there is no intraday options tick data cached
+# anywhere in this project. So "real theta pricing" here means: real EOD
+# quotes are used to calibrate that day's IV (same technique as
+# backtest_real_data.py's OptionPricer._day_iv), which then feeds a
+# Black-Scholes intraday walk. It is NOT literal real intraday bid/ask at
+# the entry/exit bar — that data doesn't exist in this cache. Days lacking
+# a usable same-day 0DTE theta file are skipped outright (see
+# theta_0dte_usable) rather than silently falling back to synthetic pricing,
+# so the "usable vs skipped" coverage counts below are meaningful.
+# ══════════════════════════════════════════════════════════════════════════════
+
+OR_POC_MIN         = 15     # opening range length in minutes (9:30-9:44)
+OR_POC_TICK        = 0.01   # SPY underlying tick size
+OR_POC_STOP_TICKS  = 2      # stop = POC +/- this many ticks
+OR_POC_RR          = 3.0    # fixed target:risk ratio on the underlying move
+
+_THETA_CACHE: Dict[str, Optional[dict]] = {}
+
+def _load_theta_file(exp_ds: str) -> Optional[dict]:
+    """Cache-only loader for backtest_data/theta_SPY_{exp_ds}.pkl.
+    Returns None if the file is missing, the known 5-byte empty placeholder,
+    or fails to unpickle. Memoized since one expiration file gets reused as
+    the IV-calibration source for many different observation days."""
+    if exp_ds in _THETA_CACHE:
+        return _THETA_CACHE[exp_ds]
+    p = DATA_DIR / f'theta_SPY_{exp_ds}.pkl'
+    result = None
+    if p.exists() and p.stat().st_size > 5:
+        try:
+            with p.open('rb') as f:
+                d = pickle.load(f)
+            if d:
+                result = d
+        except Exception:
+            result = None
+    _THETA_CACHE[exp_ds] = result
+    return result
+
+def theta_0dte_usable(ds: str) -> bool:
+    """True if theta_SPY_{ds}.pkl (expiration == ds, i.e. the 0DTE chain for
+    that trading day) contains at least one real same-day quote with ask>0."""
+    chain = _load_theta_file(ds)
+    if not chain:
+        return False
+    return any(k[0] == ds and v.get('ask', 0) > 0 for k, v in chain.items())
+
+def calibrate_iv_theta(ds: str, spy_close: float, r: float) -> Tuple[Optional[float], str]:
+    """Median IV backed out (via py_vollib) from real theta EOD quotes of
+    3-15 DTE expirations observed on `ds`, near-ATM strikes only. Returns
+    (iv, 'theta_calibrated') if any such cached chain exists, else
+    (None, 'vix_fallback') so the caller can fall back to vix/100."""
+    obs = date.fromisoformat(ds)
+    ivs = []
+    for dte in range(3, 16):
+        exp = obs + timedelta(days=dte)
+        if exp.weekday() >= 5:
+            continue
+        chain = _load_theta_file(exp.isoformat())
+        if not chain:
+            continue
+        T = dte / 365.0
+        for (kd, strike, right), q in chain.items():
+            if kd != ds:
+                continue
+            if spy_close <= 0 or abs(strike - spy_close) > spy_close * 0.015:
+                continue
+            mid = (q.get('bid', 0) + q.get('ask', 0)) / 2.0
+            if mid <= 0.01:
+                continue
+            flag = 'c' if right == 'C' else 'p'
+            try:
+                iv = _pv_iv(mid, spy_close, strike, T, r, flag)
+                if iv and 0.02 < iv < 5.0:
+                    ivs.append(iv)
+            except Exception:
+                pass
+    if ivs:
+        return float(np.median(ivs)), 'theta_calibrated'
+    return None, 'vix_fallback'
+
+def calc_poc(bars_1min: list, tick: float = OR_POC_TICK) -> Optional[float]:
+    """Point of control from a set of 1-min OHLCV bars: each bar's volume is
+    spread evenly across its [low, high] range in `tick` increments (the
+    standard approximation for building a volume profile from bars instead
+    of raw tick prints), then POC = the price level with the most
+    accumulated volume."""
+    vol_by_price: Dict[int, float] = defaultdict(float)
+    for b in bars_1min:
+        lo, hi, v = b['l'], b['h'], b['v']
+        if v <= 0 or hi < lo:
+            continue
+        lo_t, hi_t = round(lo / tick), round(hi / tick)
+        n = hi_t - lo_t + 1
+        share = v / n
+        for t in range(lo_t, hi_t + 1):
+            vol_by_price[t] += share
+    if not vol_by_price:
+        return None
+    best_t = max(vol_by_price.items(), key=lambda kv: kv[1])[0]
+    return round(best_t * tick, 2)
+
+def _et(b) -> datetime:
+    return datetime.fromtimestamp(b['t'] / 1000, tz=ET)
+
+def _or_poc_price(S, K, mins_left, iv, r, flag, spread_pct=0.07):
+    T   = max(mins_left, 0.5) / TRADING_MINS
+    mid = max(bs_price(S, K, T, r, iv, flag), 0.01)
+    return mid * (1 - spread_pct / 2), mid * (1 + spread_pct / 2)   # bid, ask
+
+@dataclass
+class ORPocTrade:
+    date:          str
+    entry_date:    str   # alias of `date`, kept so calc_stats() works unmodified
+    entry_time:    str
+    exit_time:     str
+    direction:     str
+    strike:        float
+    or_high:       float
+    or_low:        float
+    poc:           float
+    entry_spy:     float
+    stop_spy:      float
+    target_spy:    float
+    exit_spy:      float
+    entry_option:  float
+    exit_option:   float
+    exit_reason:   str
+    pnl:           float
+    iv:            float
+    iv_source:     str
+
+def run_r7_or_poc_rr3(spy_1min: dict, spy_5min: dict, spy_daily: dict, vix_daily: dict,
+                       dates: List[str]) -> Tuple[List[ORPocTrade], dict]:
+    trades   = []
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0,
+                'iv_theta_calibrated': 0, 'iv_vix_fallback': 0, 'signal_days': 0}
+
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        bars_5min = spy_5min.get(ds, [])
+        if len(bars_1min) < OR_POC_MIN + 5 or len(bars_5min) < 4:
+            continue
+        dt_obj = date.fromisoformat(ds)
+        coverage['total_days'] += 1
+
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        sig = find_or_poc_signal(ds, bars_1min, bars_5min)
+        if sig is None:
+            continue
+        coverage['signal_days'] += 1
+
+        bars      = sig['bars']    # 1-min bars, used below for the exit walk
+        direction = sig['direction']
+        entry_idx = sig['entry_idx']
+        entry_dt  = sig['entry_dt']
+        entry_spy = sig['entry_spy']
+        strike    = sig['strike']
+        poc       = sig['poc']
+        or_high   = sig['or_high']
+        or_low    = sig['or_low']
+
+        # Use the raw intraday close, NOT spy_daily's cached close: spy_daily was
+        # fetched from yfinance with auto_adjust=True (dividend/split-adjusted),
+        # which diverges from Alpaca's raw 1-min prices by up to ~7% on older
+        # dates. Mixing the two would silently corrupt the near-ATM strike
+        # filter in calibrate_iv_theta() below.
+        spy_close = sig['or_close']
+        r   = rfr(dt_obj)
+        vix = vix_daily.get(ds, 16.0)
+        iv, iv_source = calibrate_iv_theta(ds, spy_close, r)
+        if iv is None:
+            iv = vix / 100.0
+        coverage['iv_theta_calibrated' if iv_source == 'theta_calibrated' else 'iv_vix_fallback'] += 1
+
+        if direction == 'c':
+            stop_spy = poc - OR_POC_STOP_TICKS * OR_POC_TICK
+            if stop_spy >= entry_spy:
+                continue
+            risk       = entry_spy - stop_spy
+            target_spy = entry_spy + OR_POC_RR * risk
+        else:
+            stop_spy = poc + OR_POC_STOP_TICKS * OR_POC_TICK
+            if stop_spy <= entry_spy:
+                continue
+            risk       = stop_spy - entry_spy
+            target_spy = entry_spy - OR_POC_RR * risk
+        if risk < 0.02:
+            continue
+
+        mins_left_entry = max(16 * 60 - (entry_dt.hour * 60 + entry_dt.minute), 1)
+        entry_bid, entry_ask = _or_poc_price(entry_spy, strike, mins_left_entry, iv, r, direction)
+        if entry_ask <= 0 or entry_ask * 100 > 1500:
+            continue
+
+        exit_bar, exit_reason, exit_spy = None, 'EOD', None
+        cutoff = (13, 30)
+        for b2 in bars[entry_idx + 1:]:
+            t2 = _et(b2)
+            if (t2.hour, t2.minute) >= cutoff:
+                exit_bar, exit_reason, exit_spy = b2, '1:30 cutoff', b2['c']
+                break
+            if direction == 'c':
+                if b2['l'] <= stop_spy:
+                    exit_bar, exit_reason, exit_spy = b2, 'stop (POC-2t)', stop_spy
+                    break
+                if b2['h'] >= target_spy:
+                    exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                    break
+            else:
+                if b2['h'] >= stop_spy:
+                    exit_bar, exit_reason, exit_spy = b2, 'stop (POC+2t)', stop_spy
+                    break
+                if b2['l'] <= target_spy:
+                    exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                    break
+        if exit_bar is None:
+            exit_bar, exit_reason, exit_spy = bars[-1], 'EOD', bars[-1]['c']
+
+        exit_dt        = _et(exit_bar)
+        mins_left_exit = max(16 * 60 - (exit_dt.hour * 60 + exit_dt.minute), 1)
+        exit_bid, _ = _or_poc_price(exit_spy, strike, mins_left_exit, iv, r, direction)
+        pnl = round((exit_bid - entry_ask) * 100, 2)
+
+        trades.append(ORPocTrade(
+            date=ds, entry_date=ds, entry_time=entry_dt.strftime('%H:%M'),
+            exit_time=exit_dt.strftime('%H:%M'),
+            direction=('CALL' if direction == 'c' else 'PUT'), strike=strike,
+            or_high=round(or_high, 2), or_low=round(or_low, 2), poc=poc,
+            entry_spy=round(entry_spy, 2), stop_spy=round(stop_spy, 2),
+            target_spy=round(target_spy, 2), exit_spy=round(exit_spy, 2),
+            entry_option=round(entry_ask, 4), exit_option=round(exit_bid, 4),
+            exit_reason=exit_reason, pnl=pnl, iv=round(iv, 4), iv_source=iv_source))
+
+    return trades, coverage
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R7-POC-RR3 with REAL intraday ThetaData quotes (replaces the BS/IV-calibrated
+# fill above with actual fetched bid/ask) + a stop-distance sweep.
+#
+# Signal detection (OR/POC/breakout/strike/entry) is IDENTICAL to
+# run_r7_or_poc_rr3 above and reuses the same 552-day theta_0dte_usable gate.
+# Only the option FILL PRICE changes: instead of Black-Scholes with a
+# theta-calibrated IV, this fetches real 1-min bid/ask from ThetaData's
+# option_history_quote for the exact contract chosen at entry, covering
+# entry_time -> 13:30 cutoff (the widest possible exit window), fetched ONCE
+# per signal day and cached to disk. Because entry/strike/direction don't
+# depend on stop distance, the sweep reuses one fetched quote series per day
+# across all stop-distance variants instead of re-fetching per variant.
+# ══════════════════════════════════════════════════════════════════════════════
+
+INTRADAY_CACHE_DIR = DATA_DIR / 'theta_intraday'
+INTRADAY_CACHE_DIR.mkdir(exist_ok=True)
+_THETA_ENV_PATH = Path(r'C:\Users\sagla\.tastytrade-mcp\.env')
+
+_THETA_CLIENT     = None
+THETA_API_CALLS   = 0
+THETA_API_SECONDS = 0.0
+
+def _load_theta_env() -> dict:
+    env = {}
+    if _THETA_ENV_PATH.exists():
+        for line in _THETA_ENV_PATH.read_text(encoding='utf-8').splitlines():
+            if '=' in line and not line.startswith('#'):
+                k, v = line.split('=', 1)
+                env[k.strip()] = v.strip().strip("'\"")
+    return env
+
+def get_theta_client():
+    global _THETA_CLIENT
+    if _THETA_CLIENT is None:
+        from thetadata import ThetaClient
+        env = _load_theta_env()
+        _THETA_CLIENT = ThetaClient(email=env.get('THETADATA_USERNAME'),
+                                     password=env.get('THETADATA_PASSWORD'),
+                                     dataframe_type='pandas')
+    return _THETA_CLIENT
+
+def fetch_intraday_chain(ds: str, strike: float, right: str,
+                          start_hms: str, end_hms: str) -> Optional[List[dict]]:
+    """Cache-first 1-min bid/ask fetch for one (day, strike, right) contract
+    over [start_hms, end_hms]. Returns a list of {'hm': 'HH:MM', 'bid', 'ask'}
+    or None if the API had no data / errored (also cached, so a bad day isn't
+    re-hit on re-run). Tracks call count + wall time in the module-level
+    THETA_API_CALLS / THETA_API_SECONDS counters."""
+    global THETA_API_CALLS, THETA_API_SECONDS
+    tag  = f"{ds}_{strike:g}_{right}_{start_hms.replace(':','')}_{end_hms.replace(':','')}"
+    path = INTRADAY_CACHE_DIR / f'{tag}.pkl'
+    if path.exists():
+        with path.open('rb') as f:
+            return pickle.load(f)
+
+    client = get_theta_client()
+    t0 = time.time()
+    try:
+        df = client.option_history_quote(
+            symbol='SPY', expiration=date.fromisoformat(ds), interval='1m',
+            date=date.fromisoformat(ds), strike=f'{strike:g}', right=right,
+            start_time=start_hms, end_time=end_hms)
+    except Exception:
+        df = None
+    THETA_API_CALLS   += 1
+    THETA_API_SECONDS += time.time() - t0
+
+    if df is None or len(df) == 0:
+        with path.open('wb') as f:
+            pickle.dump(None, f)
+        return None
+
+    records = []
+    for _, row in df.iterrows():
+        ts = row['timestamp']
+        if ts is None:
+            continue
+        bid = float(row['bid']) if row['bid'] == row['bid'] else None   # NaN check
+        ask = float(row['ask']) if row['ask'] == row['ask'] else None
+        records.append({'hm': ts.strftime('%H:%M'), 'bid': bid, 'ask': ask})
+    with path.open('wb') as f:
+        pickle.dump(records, f)
+    return records
+
+def _nearest_prior_quote(chain: Dict[str, dict], hm: str, field: str, max_back: int = 5):
+    """Walk backward up to `max_back` minutes from `hm` for the first non-null
+    `field` (handles the rare illiquid minute with a NaN quote)."""
+    h, m = int(hm[:2]), int(hm[3:])
+    for _ in range(max_back + 1):
+        key = f'{h:02d}:{m:02d}'
+        q = chain.get(key)
+        if q and q.get(field) is not None:
+            return q[field]
+        m -= 1
+        if m < 0:
+            h, m = h - 1, 59
+    return None
+
+def find_or_poc_signal(ds: str, bars_1min: list, bars_5min: list) -> Optional[dict]:
+    """Signal-only half of run_r7_or_poc_rr3: OR/POC from the 15-min opening
+    range (1-min bars, unchanged) + breakout ENTRY DETECTION on 5-MIN candles
+    with NO volume filter - matches the original spec: any 5-min candle that
+    closes outside OR high/low triggers, no volume-surge condition. Entry
+    fills at the close of the NEXT 5-min candle after the trigger.
+
+    The stop/target exit walk still runs on 1-min bars for finer resolution
+    (unchanged from before - only the entry trigger's bar size changed), so
+    entry_idx below is the first 1-min bar at or after the entry candle's
+    CLOSE time (trigger_start + 5min), not its start - anchoring to the
+    start would let the exit walk see 1-min bars from inside the still-
+    forming entry candle, before that candle's close price was realized.
+
+    Shared by both the BS-simulated and real-theta-quote execution paths so
+    the signal logic stays identical between them.
+    """
+    or_bars = [b for b in bars_1min if (9, 30) <= (_et(b).hour, _et(b).minute) < (9, 30 + OR_POC_MIN)]
+    if len(or_bars) < OR_POC_MIN * 2 // 3:
+        return None
+    or_high = max(b['h'] for b in or_bars)
+    or_low  = min(b['l'] for b in or_bars)
+    if or_high - or_low < 0.20:
+        return None
+    poc = calc_poc(or_bars)
+    if poc is None:
+        return None
+
+    direction, trigger_i = None, None
+    for i, b in enumerate(bars_5min):
+        t = _et(b)
+        if (t.hour, t.minute) < (9, 45):
+            continue
+        if (t.hour, t.minute) >= (12, 0):
+            break
+        if b['c'] > or_high:
+            direction, trigger_i = 'c', i
+            break
+        if b['c'] < or_low:
+            direction, trigger_i = 'p', i
+            break
+    if direction is None or trigger_i is None or trigger_i + 1 >= len(bars_5min):
+        return None
+
+    entry_bar_5m   = bars_5min[trigger_i + 1]
+    entry_spy      = entry_bar_5m['c']
+    entry_close_ts = _et(entry_bar_5m) + timedelta(minutes=5)
+    strike         = round(entry_spy / 0.5) * 0.5
+
+    entry_idx = next((i for i, b in enumerate(bars_1min) if _et(b) >= entry_close_ts), None)
+    if entry_idx is None:
+        return None
+    entry_dt = _et(bars_1min[entry_idx])
+
+    return {'ds': ds, 'bars': bars_1min, 'direction': direction, 'entry_idx': entry_idx,
+            'entry_dt': entry_dt, 'entry_spy': entry_spy, 'strike': strike,
+            'poc': poc, 'or_high': round(or_high, 2), 'or_low': round(or_low, 2),
+            'or_close': or_bars[-1]['c']}
+
+def snap_to_real_strike(ds: str, raw_strike: float, right: str) -> Optional[float]:
+    """Nearest strike that actually exists in that day's real 0DTE theta EOD
+    chain. Real intraday quotes only exist for strikes the exchange actually
+    listed that day (SPY didn't list $0.50-wide 0DTE strikes broadly until
+    later - many `round(spy/0.5)*0.5` strikes from find_or_poc_signal are not
+    real contracts), unlike the Black-Scholes path, which can price any
+    hypothetical strike. Only used by the real-quote pipeline; the BS path's
+    signal/strike selection above is left untouched."""
+    chain = _load_theta_file(ds)
+    if not chain:
+        return None
+    strikes = sorted({k[1] for k in chain.keys() if k[0] == ds and k[2] == right})
+    if not strikes:
+        return None
+    return min(strikes, key=lambda s: abs(s - raw_strike))
+
+@dataclass
+class ORPocTradeReal:
+    date:          str
+    entry_date:    str
+    entry_time:    str
+    exit_time:     str
+    direction:     str
+    strike:        float
+    or_high:       float
+    or_low:        float
+    poc:           float
+    entry_spy:     float
+    stop_spy:      float
+    target_spy:    float
+    exit_spy:      float
+    entry_option:  float
+    exit_option:   float
+    exit_reason:   str
+    pnl:           float
+    stop_distance: float
+
+def _simulate_trade_real(sig: dict, stop_distance: float) -> Optional[ORPocTradeReal]:
+    ds, direction, strike = sig['ds'], sig['direction'], sig['strike']
+    poc, bars, entry_idx  = sig['poc'], sig['bars'], sig['entry_idx']
+    entry_dt, entry_spy   = sig['entry_dt'], sig['entry_spy']
+    chain = sig.get('chain')
+    if not chain:
+        return None
+
+    if direction == 'c':
+        stop_spy = poc - stop_distance
+        if stop_spy >= entry_spy:
+            return None
+        risk       = entry_spy - stop_spy
+        target_spy = entry_spy + OR_POC_RR * risk
+    else:
+        stop_spy = poc + stop_distance
+        if stop_spy <= entry_spy:
+            return None
+        risk       = stop_spy - entry_spy
+        target_spy = entry_spy - OR_POC_RR * risk
+    if risk < 0.02:
+        return None
+
+    entry_hm = entry_dt.strftime('%H:%M')
+    entry_ask = _nearest_prior_quote(chain, entry_hm, 'ask')
+    if entry_ask is None or entry_ask <= 0:
+        return None
+
+    exit_bar, exit_reason, exit_spy = None, 'EOD', None
+    cutoff = (13, 30)
+    for b2 in bars[entry_idx + 1:]:
+        t2 = _et(b2)
+        if (t2.hour, t2.minute) >= cutoff:
+            exit_bar, exit_reason, exit_spy = b2, '1:30 cutoff', b2['c']
+            break
+        if direction == 'c':
+            if b2['l'] <= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (POC-{stop_distance:.2f})', stop_spy
+                break
+            if b2['h'] >= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                break
+        else:
+            if b2['h'] >= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (POC+{stop_distance:.2f})', stop_spy
+                break
+            if b2['l'] <= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                break
+    if exit_bar is None:
+        exit_bar, exit_reason, exit_spy = bars[-1], 'EOD', bars[-1]['c']
+    exit_dt = _et(exit_bar)
+
+    exit_bid = _nearest_prior_quote(chain, exit_dt.strftime('%H:%M'), 'bid')
+    if exit_bid is None:
+        return None
+
+    pnl = round((exit_bid - entry_ask) * 100, 2)
+    return ORPocTradeReal(
+        date=ds, entry_date=ds, entry_time=entry_hm, exit_time=exit_dt.strftime('%H:%M'),
+        direction=('CALL' if direction == 'c' else 'PUT'), strike=strike,
+        or_high=sig['or_high'], or_low=sig['or_low'], poc=poc,
+        entry_spy=round(entry_spy, 2), stop_spy=round(stop_spy, 2),
+        target_spy=round(target_spy, 2), exit_spy=round(exit_spy, 2),
+        entry_option=round(entry_ask, 4), exit_option=round(exit_bid, 4),
+        exit_reason=exit_reason, pnl=pnl, stop_distance=stop_distance)
+
+def run_r7_or_poc_rr3_real(spy_1min: dict, spy_5min: dict, dates: List[str],
+                            stop_distances: List[float],
+                            progress_every: int = 50) -> Tuple[Dict[float, List[ORPocTradeReal]], dict]:
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0, 'signal_days': 0,
+                'strike_unavailable': 0, 'intraday_fetch_ok': 0, 'intraday_fetch_failed': 0}
+    signals = []
+
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        bars_5min = spy_5min.get(ds, [])
+        if len(bars_1min) < OR_POC_MIN + 5 or len(bars_5min) < 4:
+            continue
+        coverage['total_days'] += 1
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        sig = find_or_poc_signal(ds, bars_1min, bars_5min)
+        if sig is None:
+            continue
+        coverage['signal_days'] += 1
+
+        # Real quotes only exist for strikes actually listed that day - snap
+        # the BS path's round-to-$0.50 strike to the nearest real one.
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        real_strike = snap_to_real_strike(ds, sig['strike'], right)
+        if real_strike is None:
+            coverage['strike_unavailable'] += 1
+            continue
+        sig['strike'] = real_strike
+        signals.append(sig)
+
+    print(f'  {len(signals)} signal days -> fetching real intraday quotes '
+          f'(cache-first, one call/day covering entry->13:30)...')
+    for n, sig in enumerate(signals, 1):
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        chain_list = fetch_intraday_chain(
+            sig['ds'], sig['strike'], right,
+            sig['entry_dt'].strftime('%H:%M:%S'), '13:30:00')
+        sig['chain'] = {r['hm']: r for r in chain_list} if chain_list else None
+        if sig['chain']:
+            coverage['intraday_fetch_ok'] += 1
+        else:
+            coverage['intraday_fetch_failed'] += 1
+        if progress_every and n % progress_every == 0:
+            print(f'    {n}/{len(signals)} fetched  '
+                  f'(api_calls={THETA_API_CALLS}, api_time={THETA_API_SECONDS:.1f}s)')
+
+    results = {}
+    for sd in stop_distances:
+        trades = []
+        for sig in signals:
+            t = _simulate_trade_real(sig, sd)
+            if t is not None:
+                trades.append(t)
+        results[sd] = trades
+
+    return results, coverage
+
+def write_real_sweep_csv(results: Dict[float, List[ORPocTradeReal]], path: Path):
+    import csv as _csv
+    with path.open('w', newline='') as f:
+        w = _csv.writer(f)
+        w.writerow(['stop_distance', 'date', 'entry_time', 'entry_price', 'stop', 'target',
+                    'exit_price', 'exit_reason', 'pnl', 'direction', 'strike', 'poc',
+                    'or_high', 'or_low', 'exit_time', 'option_entry_price', 'option_exit_price'])
+        for sd, trades in results.items():
+            for t in trades:
+                w.writerow([sd, t.date, t.entry_time, t.entry_spy, t.stop_spy, t.target_spy,
+                            t.exit_spy, t.exit_reason, t.pnl, t.direction, t.strike, t.poc,
+                            t.or_high, t.or_low, t.exit_time, t.entry_option, t.exit_option])
+
+def run_orb_poc_real_cli():
+    print(f"\n{'='*70}\n  R7-POC-RR3 - REAL intraday ThetaData quotes, stop-distance sweep\n{'='*70}\n")
+    print("  Loading market data...")
+    spy_daily = load_spy_daily()
+    spy_1min  = load_spy_1min()
+    spy_5min  = load_spy_5min()
+    all_dates = sorted(spy_daily.keys())
+
+    stop_distances = [0.05, 0.10, 0.15, 0.25, 0.50]
+    t0 = time.time()
+    results, coverage = run_r7_or_poc_rr3_real(spy_1min, spy_5min, all_dates, stop_distances)
+    elapsed = time.time() - t0
+
+    out_path = BASE / 'trades_rr3.0_real_sweep.csv'
+    write_real_sweep_csv(results, out_path)
+
+    print(f"\n  Elapsed: {elapsed:.1f}s\n")
+    print("  -- Coverage --")
+    print(f"  Total candidate days:     {coverage['total_days']}")
+    print(f"  Theta 0DTE usable:        {coverage['theta_usable']}")
+    print(f"  Theta 0DTE skipped:       {coverage['theta_skipped']}")
+    print(f"  Signal days:              {coverage['signal_days']}")
+    print(f"  Strike unavailable:       {coverage['strike_unavailable']}  (no real listed contract near that strike)")
+    print(f"  Intraday fetch OK:        {coverage['intraday_fetch_ok']}")
+    print(f"  Intraday fetch failed:    {coverage['intraday_fetch_failed']}")
+    print(f"  ThetaData API calls:      {THETA_API_CALLS}  (total {THETA_API_SECONDS:.1f}s, "
+          f"avg {THETA_API_SECONDS/max(THETA_API_CALLS,1)*1000:.0f}ms/call)")
+    print()
+    print("  -- Per-stop-distance stats (real intraday fills) --")
+    for sd in stop_distances:
+        s = calc_stats(results[sd])
+        print(f"  stop=${sd:.2f}  N={s['n']:>4}  WR={s['wr']:>5.1f}%  "
+              f"Total P&L=${s['total_pnl']:>+10,.2f}  PF={fmt_pf(s):>5}  "
+              f"AvgWin=${s['avg_win']:>7.2f}  AvgLoss=${s['avg_loss']:>8.2f}  MaxDD=${s['max_dd']:>9,.2f}")
+    print(f"\n  Wrote sweep results -> {out_path}")
+    return results, coverage
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# R7-POC-RR3 WEEKLY variant — identical OR/POC/breakout signal logic and exit
+# walk as run_r7_or_poc_rr3_real above, but instead of buying the same-day
+# (0DTE) contract, buys the NEAREST expiration that is 3-5 calendar days out
+# (a "weekly", never same-day). Tests whether the 0DTE version's edge is
+# actually being eaten by 0DTE's wide bid/ask spread: weeklies have much
+# higher absolute premium (more time value) but should have tighter
+# spread-as-%-of-price.
+#
+# Expirations come from a real ThetaData API call (option_list_expirations),
+# cached once to disk (backtest_data/theta_SPY_expirations.pkl — already
+# present from prior research, reused here). Real strikes for the chosen
+# weekly expiration come from option_list_strikes (real API call, cached per
+# expiration). Fills are real 1-min bid/ask from option_history_quote, exactly
+# like the 0DTE path, just with `expiration` != `date`.
+# ══════════════════════════════════════════════════════════════════════════════
+
+WEEKLY_DTE_MIN = 3
+WEEKLY_DTE_MAX = 5
+
+EXPIRATIONS_CACHE_PATH      = DATA_DIR / 'theta_SPY_expirations.pkl'
+EXPIRATIONS_CACHE_META_PATH = DATA_DIR / 'theta_SPY_expirations_fetched_at.pkl'
+_ALL_EXPS_CACHE: Optional[List[date]] = None
+_ALL_EXPS_CACHE_DATE: Optional[date] = None
+
+def _theta_retry(fn, attempts: int = 4, base_delay: float = 2.0):
+    """Small retry wrapper for live ThetaData calls — the remote gRPC
+    endpoint occasionally returns a transient 502 (observed in testing),
+    which clears on retry. Raises the last exception if all attempts fail.
+
+    Does NOT retry thetadata.errors.NoDataFoundError — that's a legitimate
+    "this contract/day has no data" business response (e.g. a probed
+    strike that was never listed), not a transient failure, and retrying
+    it would just waste ~12s of sleep per miss for no benefit."""
+    from thetadata.errors import NoDataFoundError
+    last_exc = None
+    for i in range(attempts):
+        try:
+            return fn()
+        except NoDataFoundError:
+            raise
+        except Exception as e:
+            last_exc = e
+            if i < attempts - 1:
+                time.sleep(base_delay * (i + 1))
+    raise last_exc
+
+def _extract_expiration_dates(raw) -> List[date]:
+    """Normalize option_list_expirations()'s return value to a list of
+    `date` objects. Newer thetadata-python returns a DataFrame with an
+    'expiration' column; older versions returned a plain iterable of
+    date/str. Handling both means this doesn't silently mis-parse if the
+    installed SDK version changes again."""
+    if hasattr(raw, 'columns') and 'expiration' in raw.columns:
+        raw = raw['expiration']
+    out = []
+    for e in raw:
+        out.append(e if isinstance(e, date) else date.fromisoformat(str(e)))
+    return out
+
+
+def get_all_theta_expirations(force_refresh: bool = False) -> List[date]:
+    """All SPY option expirations ThetaData currently lists. Exchanges add
+    new near-term weeklies/dailies on a rolling basis, so a cache that never
+    expires will silently miss expirations for recent/live observation days
+    (confirmed 2026-09-24: a stale cache built before 2026-09-21 was missing
+    every expiration from 2026-09-21 through 2026-10-09). Refreshed at most
+    once per calendar day - cheap enough (one API call) not to need a
+    tighter TTL, and per-day is enough since expirations are never listed
+    and then un-listed within a day.
+
+    EXPIRATIONS_CACHE_PATH itself stays a bare sorted list of dates, same
+    format as always - other scripts (e.g. backtest_lotto_basket.py) read
+    that file directly and expect that shape. The daily-refresh TTL is
+    tracked in a separate sidecar file (EXPIRATIONS_CACHE_META_PATH) so this
+    fix doesn't change the on-disk contract for those other readers."""
+    global _ALL_EXPS_CACHE, _ALL_EXPS_CACHE_DATE
+    today = date.today()
+    if not force_refresh and _ALL_EXPS_CACHE is not None and _ALL_EXPS_CACHE_DATE == today:
+        return _ALL_EXPS_CACHE
+    if not force_refresh and EXPIRATIONS_CACHE_PATH.exists() and EXPIRATIONS_CACHE_META_PATH.exists():
+        with EXPIRATIONS_CACHE_META_PATH.open('rb') as f:
+            fetched_at = pickle.load(f)
+        if fetched_at == today:
+            with EXPIRATIONS_CACHE_PATH.open('rb') as f:
+                _ALL_EXPS_CACHE = pickle.load(f)
+            _ALL_EXPS_CACHE_DATE = today
+            return _ALL_EXPS_CACHE
+    client = get_theta_client()
+    raw = _theta_retry(lambda: client.option_list_expirations('SPY'))
+    exps = sorted(_extract_expiration_dates(raw))
+    with EXPIRATIONS_CACHE_PATH.open('wb') as f:
+        pickle.dump(exps, f)
+    with EXPIRATIONS_CACHE_META_PATH.open('wb') as f:
+        pickle.dump(today, f)
+    _ALL_EXPS_CACHE, _ALL_EXPS_CACHE_DATE = exps, today
+    return exps
+
+def nearest_weekly_expiration(ds: str, all_exps: List[date],
+                               dte_min: int = WEEKLY_DTE_MIN,
+                               dte_max: int = WEEKLY_DTE_MAX) -> Optional[date]:
+    """Nearest expiration with dte_min <= (exp - ds).days <= dte_max — i.e.
+    the closest expiration that is NOT same-day but is still within about a
+    week out. None if no listed expiration falls in that band (rare, e.g.
+    around holidays)."""
+    obs = date.fromisoformat(ds)
+    candidates = [e for e in all_exps if dte_min <= (e - obs).days <= dte_max]
+    if not candidates:
+        return None
+    return min(candidates, key=lambda e: (e - obs).days)
+
+INTRADAY_WEEKLY_CACHE_DIR = DATA_DIR / 'theta_intraday_weekly'
+INTRADAY_WEEKLY_CACHE_DIR.mkdir(exist_ok=True)
+
+def fetch_intraday_chain_weekly(ds: str, exp: date, strike: float, right: str,
+                                 start_hms: str, end_hms: str) -> Optional[List[dict]]:
+    """Weekly-expiration analogue of fetch_intraday_chain: real 1-min
+    bid/ask for one (observation day, expiration, strike, right) contract
+    over [start_hms, end_hms], cache-first, cache-forever (including None
+    results, so a day with no data isn't re-hit on re-run)."""
+    global THETA_API_CALLS, THETA_API_SECONDS
+    tag  = (f"{ds}_{exp.isoformat()}_{strike:g}_{right}_"
+            f"{start_hms.replace(':','')}_{end_hms.replace(':','')}")
+    path = INTRADAY_WEEKLY_CACHE_DIR / f'{tag}.pkl'
+    if path.exists():
+        with path.open('rb') as f:
+            return pickle.load(f)
+
+    client = get_theta_client()
+    t0 = time.time()
+    try:
+        df = _theta_retry(lambda: client.option_history_quote(
+            symbol='SPY', expiration=exp, interval='1m',
+            date=date.fromisoformat(ds), strike=f'{strike:g}', right=right,
+            start_time=start_hms, end_time=end_hms))
+    except Exception:
+        df = None
+    THETA_API_CALLS   += 1
+    THETA_API_SECONDS += time.time() - t0
+
+    if df is None or len(df) == 0:
+        with path.open('wb') as f:
+            pickle.dump(None, f)
+        return None
+
+    records = []
+    for _, row in df.iterrows():
+        ts = row['timestamp']
+        if ts is None:
+            continue
+        bid = float(row['bid']) if row['bid'] == row['bid'] else None
+        ask = float(row['ask']) if row['ask'] == row['ask'] else None
+        records.append({'hm': ts.strftime('%H:%M'), 'bid': bid, 'ask': ask})
+    with path.open('wb') as f:
+        pickle.dump(records, f)
+    return records
+
+STRIKE_STEP           = 0.5   # SPY's near-term strike increment
+STRIKE_SEARCH_RADIUS  = 4     # probe up to +/- 4 steps ($2) from the raw guess
+
+def find_weekly_contract(ds: str, exp: date, raw_strike: float, right: str,
+                          start_hms: str, end_hms: str,
+                          radius: int = STRIKE_SEARCH_RADIUS,
+                          step: float = STRIKE_STEP
+                          ) -> Tuple[Optional[float], Optional[List[dict]]]:
+    """Find a real, quoted weekly contract near raw_strike by probing
+    outward with narrow single-strike intraday quote fetches.
+
+    NOTE: option_list_strikes and option_history_eod(strike='*') both
+    returned persistent 502s from ThetaData's remote endpoint during
+    testing (bulk/wildcard queries) while single-strike, single-day
+    option_history_quote calls were reliable. So instead of listing the
+    real chain and snapping to it, this probes candidate strikes
+    (raw_strike, then +/-0.5, +/-1.0, ... out to `radius` steps) directly
+    via the narrow endpoint and takes the first one with real data — which
+    both confirms the strike is real AND fetches its quotes in the same
+    call, so no separate snap step or extra round-trip is needed.
+    """
+    tried = set()
+    offsets = [0.0]
+    for k in range(1, radius + 1):
+        offsets += [k * step, -k * step]
+    for off in offsets:
+        strike = round((raw_strike + off) / step) * step
+        if strike in tried or strike <= 0:
+            continue
+        tried.add(strike)
+        chain_list = fetch_intraday_chain_weekly(ds, exp, strike, right, start_hms, end_hms)
+        if chain_list:
+            return strike, chain_list
+    return None, None
+
+@dataclass
+class ORPocTradeWeekly:
+    date:          str
+    entry_date:    str
+    entry_time:    str
+    exit_time:     str
+    direction:     str
+    strike:        float
+    expiration:    str
+    dte:           int
+    or_high:       float
+    or_low:        float
+    poc:           float
+    entry_spy:     float
+    stop_spy:      float
+    target_spy:    float
+    exit_spy:      float
+    entry_option:  float
+    exit_option:   float
+    exit_reason:   str
+    pnl:           float
+    stop_distance: float
+    entry_bid:     Optional[float]
+    entry_ask:     float
+    exit_bid:      float
+    exit_ask:      Optional[float]
+
+def _simulate_trade_weekly(sig: dict, stop_distance: float) -> Optional[ORPocTradeWeekly]:
+    """Weekly-expiration analogue of _simulate_trade_real: identical
+    stop/target/exit-walk logic (unchanged from the 0DTE path — only the
+    option contract being priced differs), but also records both sides of
+    the entry/exit quote (not just the side used for P&L) so spread-as-%-
+    of-price can be computed afterward without re-fetching anything."""
+    ds, direction, strike = sig['ds'], sig['direction'], sig['strike']
+    poc, bars, entry_idx  = sig['poc'], sig['bars'], sig['entry_idx']
+    entry_dt, entry_spy   = sig['entry_dt'], sig['entry_spy']
+    chain = sig.get('chain')
+    if not chain:
+        return None
+
+    if direction == 'c':
+        stop_spy = poc - stop_distance
+        if stop_spy >= entry_spy:
+            return None
+        risk       = entry_spy - stop_spy
+        target_spy = entry_spy + OR_POC_RR * risk
+    else:
+        stop_spy = poc + stop_distance
+        if stop_spy <= entry_spy:
+            return None
+        risk       = stop_spy - entry_spy
+        target_spy = entry_spy - OR_POC_RR * risk
+    if risk < 0.02:
+        return None
+
+    entry_hm  = entry_dt.strftime('%H:%M')
+    entry_bid = _nearest_prior_quote(chain, entry_hm, 'bid')
+    entry_ask = _nearest_prior_quote(chain, entry_hm, 'ask')
+    if entry_ask is None or entry_ask <= 0:
+        return None
+
+    exit_bar, exit_reason, exit_spy = None, 'EOD', None
+    cutoff = (13, 30)
+    for b2 in bars[entry_idx + 1:]:
+        t2 = _et(b2)
+        if (t2.hour, t2.minute) >= cutoff:
+            exit_bar, exit_reason, exit_spy = b2, '1:30 cutoff', b2['c']
+            break
+        if direction == 'c':
+            if b2['l'] <= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (POC-{stop_distance:.2f})', stop_spy
+                break
+            if b2['h'] >= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                break
+        else:
+            if b2['h'] >= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (POC+{stop_distance:.2f})', stop_spy
+                break
+            if b2['l'] <= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, '3:1 target', target_spy
+                break
+    if exit_bar is None:
+        exit_bar, exit_reason, exit_spy = bars[-1], 'EOD', bars[-1]['c']
+    exit_dt = _et(exit_bar)
+
+    exit_hm  = exit_dt.strftime('%H:%M')
+    exit_bid = _nearest_prior_quote(chain, exit_hm, 'bid')
+    exit_ask = _nearest_prior_quote(chain, exit_hm, 'ask')
+    if exit_bid is None:
+        return None
+
+    pnl = round((exit_bid - entry_ask) * 100, 2)
+    return ORPocTradeWeekly(
+        date=ds, entry_date=ds, entry_time=entry_hm, exit_time=exit_hm,
+        direction=('CALL' if direction == 'c' else 'PUT'), strike=strike,
+        expiration=sig['expiration'].isoformat(), dte=sig['dte'],
+        or_high=sig['or_high'], or_low=sig['or_low'], poc=poc,
+        entry_spy=round(entry_spy, 2), stop_spy=round(stop_spy, 2),
+        target_spy=round(target_spy, 2), exit_spy=round(exit_spy, 2),
+        entry_option=round(entry_ask, 4), exit_option=round(exit_bid, 4),
+        exit_reason=exit_reason, pnl=pnl, stop_distance=stop_distance,
+        entry_bid=(round(entry_bid, 4) if entry_bid is not None else None),
+        entry_ask=round(entry_ask, 4), exit_bid=round(exit_bid, 4),
+        exit_ask=(round(exit_ask, 4) if exit_ask is not None else None))
+
+def build_or_poc_weekly_signals(spy_1min: dict, spy_5min: dict, dates: List[str],
+                                 dte_min: int = WEEKLY_DTE_MIN,
+                                 dte_max: int = WEEKLY_DTE_MAX) -> Tuple[list, dict]:
+    """Signal-building half of the weekly pipeline, split out from the
+    fetch+simulate half so callers (e.g. an IS/OOS driver) can get the
+    exact same signal-day set used for trading without re-fetching quotes.
+
+    Uses the SAME gates as run_r7_or_poc_rr3_real (theta_0dte_usable +
+    find_or_poc_signal + a real 0DTE strike existing) so the signal-day set
+    is identical to the 0DTE real-quote run — this keeps the two variants
+    directly comparable (same days, same direction, same OR/POC/entry —
+    only the traded contract's expiration differs). On top of that, each
+    signal also needs a real weekly expiration in the DTE band; days
+    failing that are excluded and counted separately in `coverage` (not
+    folded into strike_0dte_unavailable). The weekly contract itself is
+    NOT validated here — see find_weekly_contract, called from the
+    fetch step in run_r7_or_poc_weekly_rr3_real, which probes for a real
+    strike and fetches its quotes in one step (bulk strike-listing calls
+    were unreliable against ThetaData's remote endpoint - see its
+    docstring).
+    """
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0,
+                'signal_days': 0, 'strike_0dte_unavailable': 0, 'no_weekly_exp': 0}
+    all_exps = get_all_theta_expirations()
+    signals = []
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        bars_5min = spy_5min.get(ds, [])
+        if len(bars_1min) < OR_POC_MIN + 5 or len(bars_5min) < 4:
+            continue
+        coverage['total_days'] += 1
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        sig = find_or_poc_signal(ds, bars_1min, bars_5min)
+        if sig is None:
+            continue
+
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        if snap_to_real_strike(ds, sig['strike'], right) is None:
+            coverage['strike_0dte_unavailable'] += 1
+            continue
+        coverage['signal_days'] += 1
+
+        exp = nearest_weekly_expiration(ds, all_exps, dte_min, dte_max)
+        if exp is None:
+            coverage['no_weekly_exp'] += 1
+            continue
+        sig['expiration'] = exp
+        sig['dte']        = (exp - date.fromisoformat(ds)).days
+        signals.append(sig)
+    return signals, coverage
+
+def run_r7_or_poc_weekly_rr3_real(spy_1min: dict, spy_5min: dict, dates: List[str],
+                                   stop_distances: List[float],
+                                   dte_min: int = WEEKLY_DTE_MIN,
+                                   dte_max: int = WEEKLY_DTE_MAX,
+                                   progress_every: int = 25
+                                   ) -> Tuple[Dict[float, List[ORPocTradeWeekly]], dict, list]:
+    signals, coverage = build_or_poc_weekly_signals(spy_1min, spy_5min, dates, dte_min, dte_max)
+    coverage['weekly_contract_unavailable'] = 0
+    coverage['intraday_fetch_ok'] = 0
+    coverage['intraday_fetch_failed'] = 0
+
+    print(f'  {len(signals)} signal days -> probing/fetching real WEEKLY intraday quotes '
+          f'(cache-first, strike probe + one call/day covering entry->13:30)...')
+    for n, sig in enumerate(signals, 1):
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        strike, chain_list = find_weekly_contract(
+            sig['ds'], sig['expiration'], sig['strike'], right,
+            sig['entry_dt'].strftime('%H:%M:%S'), '13:30:00')
+        if chain_list:
+            sig['strike'] = strike
+            sig['chain']  = {r['hm']: r for r in chain_list}
+            coverage['intraday_fetch_ok'] += 1
+        else:
+            sig['chain'] = None
+            coverage['weekly_contract_unavailable'] += 1
+            coverage['intraday_fetch_failed'] += 1
+        if progress_every and n % progress_every == 0:
+            print(f'    {n}/{len(signals)} fetched  '
+                  f'(api_calls={THETA_API_CALLS}, api_time={THETA_API_SECONDS:.1f}s)')
+
+    results = {}
+    for sd in stop_distances:
+        trades = []
+        for sig in signals:
+            t = _simulate_trade_weekly(sig, sd)
+            if t is not None:
+                trades.append(t)
+        results[sd] = trades
+
+    return results, coverage, signals
+
+def write_weekly_sweep_csv(results: Dict[float, List[ORPocTradeWeekly]], path: Path):
+    import csv as _csv
+    with path.open('w', newline='') as f:
+        w = _csv.writer(f)
+        w.writerow(['stop_distance', 'date', 'entry_time', 'entry_price', 'stop', 'target',
+                    'exit_price', 'exit_reason', 'pnl', 'direction', 'strike', 'expiration',
+                    'dte', 'poc', 'or_high', 'or_low', 'exit_time', 'option_entry_bid',
+                    'option_entry_ask', 'option_exit_bid', 'option_exit_ask'])
+        for sd, trades in results.items():
+            for t in trades:
+                w.writerow([sd, t.date, t.entry_time, t.entry_spy, t.stop_spy, t.target_spy,
+                            t.exit_spy, t.exit_reason, t.pnl, t.direction, t.strike,
+                            t.expiration, t.dte, t.poc, t.or_high, t.or_low, t.exit_time,
+                            t.entry_bid, t.entry_ask, t.exit_bid, t.exit_ask])
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# VWAP Reversion (fade) - reuses the OR/POC real-quote infrastructure wholesale
+# (theta_0dte_usable, snap_to_real_strike, fetch_intraday_chain, THETA_API_*
+# counters, _nearest_prior_quote, calc_stats) - only the signal/stop/target
+# logic is new.
+#
+# Signal: cumulative intraday VWAP +/- 2 volume-weighted sigma bands, from
+# 1-min bars starting at the 9:30 open. Entry window 9:45-12:00 ET. A 5-min
+# candle closes beyond a band (breach), then if the VERY NEXT 5-min candle
+# closes back inside the band (rejection), enter at that second candle's own
+# close - fading back toward VWAP (PUT if faded from above, CALL if faded
+# from below). Stop = the most extreme high/low reached across the breach +
+# rejection candle pair, plus a buffer (swept $0.05-$0.50, same grid as
+# OR/POC). Target = the VWAP value AT ENTRY, held fixed (not re-evaluated
+# as VWAP drifts afterward). Exit: stop / target / 1:30 ET cutoff, whichever
+# first, walked on 1-min bars exactly like OR/POC's exit walk.
+# ══════════════════════════════════════════════════════════════════════════════
+
+def calc_vwap_bands(bars_1min: list, band_mult: float = 2.0) -> Dict[str, Tuple[float, float, float]]:
+    """Cumulative intraday VWAP + volume-weighted N-sigma bands, computed
+    bar-by-bar from the 9:30 ET open using 1-min bars (no lookahead - each
+    entry only uses bars up to and including that minute). Returns
+    {'HH:MM': (vwap, upper, lower)}."""
+    result: Dict[str, Tuple[float, float, float]] = {}
+    cum_v = cum_pv = cum_pv2 = 0.0
+    for b in bars_1min:
+        t = _et(b)
+        if (t.hour, t.minute) < (9, 30):
+            continue
+        tp = (b['h'] + b['l'] + b['c']) / 3.0
+        v  = b['v']
+        if v > 0:
+            cum_pv  += v * tp
+            cum_v   += v
+            cum_pv2 += v * tp * tp
+        if cum_v <= 0:
+            continue
+        vwap     = cum_pv / cum_v
+        variance = max(cum_pv2 / cum_v - vwap * vwap, 0.0)
+        std      = variance ** 0.5
+        result[t.strftime('%H:%M')] = (vwap, vwap + band_mult * std, vwap - band_mult * std)
+    return result
+
+def _nearest_prior_vwap(vwap_map: Dict[str, tuple], hm: str, max_back: int = 4):
+    h, m = int(hm[:2]), int(hm[3:])
+    for _ in range(max_back + 1):
+        key = f'{h:02d}:{m:02d}'
+        if key in vwap_map:
+            return vwap_map[key]
+        m -= 1
+        if m < 0:
+            h, m = h - 1, 59
+    return None
+
+def find_vwap_reversion_signal(ds: str, bars_1min: list, bars_5min: list) -> Optional[dict]:
+    """Breach-then-rejection VWAP fade signal. See module docstring above."""
+    vwap_map = calc_vwap_bands(bars_1min)
+    if not vwap_map:
+        return None
+
+    def band_at(bar5):
+        end_min = _et(bar5) + timedelta(minutes=4)
+        return _nearest_prior_vwap(vwap_map, end_min.strftime('%H:%M'))
+
+    breach_dir, breach_bar = None, None
+    direction, entry_bar_5m, vwap_entry, extreme = None, None, None, None
+
+    for b in bars_5min:
+        t = _et(b)
+        if (t.hour, t.minute) < (9, 45):
+            continue
+        if (t.hour, t.minute) >= (12, 0):
+            break
+        band = band_at(b)
+        if band is None:
+            continue
+        vwap, upper, lower = band
+
+        if breach_dir is not None:
+            if lower <= b['c'] <= upper:
+                direction    = 'p' if breach_dir == 'above' else 'c'
+                entry_bar_5m = b
+                vwap_entry   = vwap
+                extreme      = (max(breach_bar['h'], b['h']) if breach_dir == 'above'
+                                 else min(breach_bar['l'], b['l']))
+                break
+            breach_dir, breach_bar = None, None   # no rejection -> pattern invalidated
+
+        if breach_dir is None:
+            if b['c'] > upper:
+                breach_dir, breach_bar = 'above', b
+            elif b['c'] < lower:
+                breach_dir, breach_bar = 'below', b
+
+    if direction is None:
+        return None
+
+    strike         = round(entry_bar_5m['c'] / 0.5) * 0.5
+    entry_close_ts = _et(entry_bar_5m) + timedelta(minutes=5)
+    entry_idx      = next((i for i, b in enumerate(bars_1min) if _et(b) >= entry_close_ts), None)
+    if entry_idx is None:
+        return None
+    entry_dt = _et(bars_1min[entry_idx])
+
+    return {'ds': ds, 'bars': bars_1min, 'direction': direction, 'entry_idx': entry_idx,
+            'entry_dt': entry_dt, 'entry_spy': entry_bar_5m['c'], 'strike': strike,
+            'vwap_entry': vwap_entry, 'extreme': round(extreme, 2)}
+
+@dataclass
+class VwapTradeReal:
+    date:          str
+    entry_date:    str
+    entry_time:    str
+    exit_time:     str
+    direction:     str
+    strike:        float
+    vwap_entry:    float
+    extreme:       float
+    entry_spy:     float
+    stop_spy:      float
+    target_spy:    float
+    exit_spy:      float
+    entry_option:  float
+    exit_option:   float
+    exit_reason:   str
+    pnl:           float
+    stop_buffer:   float
+
+def _simulate_vwap_trade_real(sig: dict, buffer: float) -> Optional[VwapTradeReal]:
+    ds, direction         = sig['ds'], sig['direction']
+    bars, entry_idx       = sig['bars'], sig['entry_idx']
+    entry_dt, entry_spy   = sig['entry_dt'], sig['entry_spy']
+    strike                = sig['strike']
+    vwap_entry, extreme   = sig['vwap_entry'], sig['extreme']
+    chain = sig.get('chain')
+    if not chain:
+        return None
+
+    if direction == 'p':          # faded a move ABOVE the upper band -> short bias
+        stop_spy = extreme + buffer
+        if stop_spy <= entry_spy:
+            return None
+        target_spy = vwap_entry
+        if target_spy >= entry_spy:
+            return None
+    else:                          # 'c', faded a move BELOW the lower band -> long bias
+        stop_spy = extreme - buffer
+        if stop_spy >= entry_spy:
+            return None
+        target_spy = vwap_entry
+        if target_spy <= entry_spy:
+            return None
+
+    entry_hm  = entry_dt.strftime('%H:%M')
+    entry_ask = _nearest_prior_quote(chain, entry_hm, 'ask')
+    if entry_ask is None or entry_ask <= 0:
+        return None
+
+    exit_bar, exit_reason, exit_spy = None, 'EOD', None
+    cutoff = (13, 30)
+    for b2 in bars[entry_idx + 1:]:
+        t2 = _et(b2)
+        if (t2.hour, t2.minute) >= cutoff:
+            exit_bar, exit_reason, exit_spy = b2, '1:30 cutoff', b2['c']
+            break
+        if direction == 'p':
+            if b2['h'] >= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (extreme+{buffer:.2f})', stop_spy
+                break
+            if b2['l'] <= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, 'VWAP target', target_spy
+                break
+        else:
+            if b2['l'] <= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (extreme-{buffer:.2f})', stop_spy
+                break
+            if b2['h'] >= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, 'VWAP target', target_spy
+                break
+    if exit_bar is None:
+        exit_bar, exit_reason, exit_spy = bars[-1], 'EOD', bars[-1]['c']
+    exit_dt = _et(exit_bar)
+
+    exit_bid = _nearest_prior_quote(chain, exit_dt.strftime('%H:%M'), 'bid')
+    if exit_bid is None:
+        return None
+
+    pnl = round((exit_bid - entry_ask) * 100, 2)
+    return VwapTradeReal(
+        date=ds, entry_date=ds, entry_time=entry_hm, exit_time=exit_dt.strftime('%H:%M'),
+        direction=('PUT' if direction == 'p' else 'CALL'), strike=strike,
+        vwap_entry=round(vwap_entry, 2), extreme=extreme,
+        entry_spy=round(entry_spy, 2), stop_spy=round(stop_spy, 2),
+        target_spy=round(target_spy, 2), exit_spy=round(exit_spy, 2),
+        entry_option=round(entry_ask, 4), exit_option=round(exit_bid, 4),
+        exit_reason=exit_reason, pnl=pnl, stop_buffer=buffer)
+
+def run_vwap_reversion_real(spy_1min: dict, spy_5min: dict, dates: List[str],
+                             stop_buffers: List[float],
+                             progress_every: int = 50) -> Tuple[Dict[float, List[VwapTradeReal]], dict]:
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0, 'signal_days': 0,
+                'strike_unavailable': 0, 'intraday_fetch_ok': 0, 'intraday_fetch_failed': 0}
+    signals = []
+
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        bars_5min = spy_5min.get(ds, [])
+        if len(bars_1min) < 20 or len(bars_5min) < 4:
+            continue
+        coverage['total_days'] += 1
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        sig = find_vwap_reversion_signal(ds, bars_1min, bars_5min)
+        if sig is None:
+            continue
+        coverage['signal_days'] += 1
+
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        real_strike = snap_to_real_strike(ds, sig['strike'], right)
+        if real_strike is None:
+            coverage['strike_unavailable'] += 1
+            continue
+        sig['strike'] = real_strike
+        signals.append(sig)
+
+    print(f'  {len(signals)} signal days -> fetching real intraday quotes '
+          f'(cache-first, one call/day covering entry->13:30)...')
+    for n, sig in enumerate(signals, 1):
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        chain_list = fetch_intraday_chain(
+            sig['ds'], sig['strike'], right,
+            sig['entry_dt'].strftime('%H:%M:%S'), '13:30:00')
+        sig['chain'] = {r['hm']: r for r in chain_list} if chain_list else None
+        if sig['chain']:
+            coverage['intraday_fetch_ok'] += 1
+        else:
+            coverage['intraday_fetch_failed'] += 1
+        if progress_every and n % progress_every == 0:
+            print(f'    {n}/{len(signals)} fetched  '
+                  f'(api_calls={THETA_API_CALLS}, api_time={THETA_API_SECONDS:.1f}s)')
+
+    results = {}
+    for buf in stop_buffers:
+        trades = []
+        for sig in signals:
+            t = _simulate_vwap_trade_real(sig, buf)
+            if t is not None:
+                trades.append(t)
+        results[buf] = trades
+
+    return results, coverage
+
+def write_vwap_csv(results: Dict[float, List[VwapTradeReal]], path: Path):
+    import csv as _csv
+    with path.open('w', newline='') as f:
+        w = _csv.writer(f)
+        w.writerow(['stop_buffer', 'date', 'entry_time', 'entry_price', 'stop', 'target',
+                    'exit_price', 'exit_reason', 'pnl', 'direction', 'strike', 'vwap_entry',
+                    'extreme', 'exit_time', 'option_entry_price', 'option_exit_price'])
+        for buf, trades in results.items():
+            for t in trades:
+                w.writerow([buf, t.date, t.entry_time, t.entry_spy, t.stop_spy, t.target_spy,
+                            t.exit_spy, t.exit_reason, t.pnl, t.direction, t.strike,
+                            t.vwap_entry, t.extreme, t.exit_time, t.entry_option, t.exit_option])
+
+def run_vwap_reversion_cli():
+    print(f"\n{'='*70}\n  VWAP Reversion (fade) - REAL intraday ThetaData quotes, stop-buffer sweep\n{'='*70}\n")
+    print("  Loading market data...")
+    spy_daily = load_spy_daily()
+    spy_1min  = load_spy_1min()
+    spy_5min  = load_spy_5min()
+    all_dates = sorted(spy_daily.keys())
+
+    stop_buffers = [0.05, 0.10, 0.15, 0.25, 0.50]
+    t0 = time.time()
+    results, coverage = run_vwap_reversion_real(spy_1min, spy_5min, all_dates, stop_buffers)
+    elapsed = time.time() - t0
+
+    out_path = BASE / 'trades_vwap_reversion.csv'
+    write_vwap_csv(results, out_path)
+
+    print(f"\n  Elapsed: {elapsed:.1f}s\n")
+    print("  -- Coverage --")
+    print(f"  Total candidate days:     {coverage['total_days']}")
+    print(f"  Theta 0DTE usable:        {coverage['theta_usable']}")
+    print(f"  Theta 0DTE skipped:       {coverage['theta_skipped']}")
+    print(f"  Signal days:              {coverage['signal_days']}")
+    print(f"  Strike unavailable:       {coverage['strike_unavailable']}  (no real listed contract near that strike)")
+    print(f"  Intraday fetch OK:        {coverage['intraday_fetch_ok']}")
+    print(f"  Intraday fetch failed:    {coverage['intraday_fetch_failed']}")
+    print(f"  ThetaData API calls:      {THETA_API_CALLS}  (total {THETA_API_SECONDS:.1f}s, "
+          f"avg {THETA_API_SECONDS/max(THETA_API_CALLS,1)*1000:.0f}ms/call)")
+    print()
+    print("  -- Per-stop-buffer stats (real intraday fills) --")
+    for buf in stop_buffers:
+        s = calc_stats(results[buf])
+        print(f"  buffer=${buf:.2f}  N={s['n']:>4}  WR={s['wr']:>5.1f}%  "
+              f"Total P&L=${s['total_pnl']:>+10,.2f}  PF={fmt_pf(s):>5}  "
+              f"AvgWin=${s['avg_win']:>7.2f}  AvgLoss=${s['avg_loss']:>8.2f}  MaxDD=${s['max_dd']:>9,.2f}")
+    print(f"\n  Wrote sweep results -> {out_path}")
+    return results, coverage
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# S/R Retest (session high/low rejection) — reuses the OR/POC real-quote
+# infrastructure wholesale (theta_0dte_usable, snap_to_real_strike,
+# fetch_intraday_chain, THETA_API_* counters, _nearest_prior_quote,
+# calc_stats, calibrate_iv_theta) — only the signal/stop/target logic is new.
+#
+# Signal: track the running session high and session low from the 9:30 ET
+# open using 1-min bars. A level becomes eligible for retest once it has held
+# (unbroken) for >= 30 minutes. Once eligible, a 1-min candle whose wick
+# comes within $0.20 of the level (touching or slightly piercing it) while
+# closing back on the original side is a rejection: retest of the low
+# holding -> CALL, retest of the high holding -> PUT. Entry at the close of
+# that candle. Any bar that prints a new session extreme resets that level's
+# eligibility clock (it's a break of the old level, not a hold), which is
+# handled implicitly by always testing against the live running high/low.
+# Stop = a fixed distance PAST the level itself (not the rejection wick),
+# swept $0.10 / $0.15. Target = fixed R:R off that risk, swept 1.5-3.5.
+# Exit: stop / target / 15:45 ET cutoff, walked on 1-min bars exactly like
+# OR/POC's exit walk.
+# ══════════════════════════════════════════════════════════════════════════════
+
+SR_ENTRY_START   = (9, 45)
+SR_ENTRY_END     = (15, 0)
+SR_EXIT_CUTOFF   = (15, 45)
+SR_LEVEL_MIN_AGE = 30        # minutes a level must hold before it's retest-eligible
+SR_PROXIMITY     = 0.20      # wick must come within this of the level
+SR_STOP_WIDTHS   = [0.10, 0.15]
+SR_RR_TARGETS    = [1.5, 2.0, 2.5, 3.0, 3.5]
+
+def find_sr_retest_signal(ds: str, bars_1min: list) -> Optional[dict]:
+    """First session-high/low retest-and-hold signal of the day, scanning
+    1-min bars chronologically from the 9:30 open. See module comment above."""
+    bars = bars_1min
+    if len(bars) < 20:
+        return None
+
+    session_high = session_low = None
+    high_set_t = low_set_t = None
+    direction = level = entry_idx = entry_dt = entry_spy = None
+
+    for i, b in enumerate(bars):
+        t = _et(b)
+        if session_high is None:
+            session_high, session_low = b['h'], b['l']
+            high_set_t = low_set_t = t
+            continue
+        if (t.hour, t.minute) > SR_ENTRY_END:
+            break
+
+        if (t.hour, t.minute) >= SR_ENTRY_START:
+            low_age  = (t - low_set_t).total_seconds() / 60.0
+            high_age = (t - high_set_t).total_seconds() / 60.0
+            if (low_age >= SR_LEVEL_MIN_AGE and b['l'] <= session_low + SR_PROXIMITY
+                    and b['c'] > session_low):
+                direction, level = 'c', session_low
+                entry_idx, entry_dt, entry_spy = i, t, b['c']
+                break
+            if (high_age >= SR_LEVEL_MIN_AGE and b['h'] >= session_high - SR_PROXIMITY
+                    and b['c'] < session_high):
+                direction, level = 'p', session_high
+                entry_idx, entry_dt, entry_spy = i, t, b['c']
+                break
+
+        if b['h'] > session_high:
+            session_high, high_set_t = b['h'], t
+        if b['l'] < session_low:
+            session_low, low_set_t = b['l'], t
+
+    if direction is None:
+        return None
+
+    strike = round(entry_spy / 0.5) * 0.5
+    return {'ds': ds, 'bars': bars, 'direction': direction, 'entry_idx': entry_idx,
+            'entry_dt': entry_dt, 'entry_spy': entry_spy, 'strike': strike,
+            'level_retested': round(level, 2)}
+
+@dataclass
+class SRRetestTradeReal:
+    date:           str
+    entry_date:     str
+    entry_time:     str
+    exit_time:      str
+    direction:      str
+    strike:         float
+    level_retested: float
+    entry_spy:      float
+    stop_spy:       float
+    target_spy:     float
+    exit_spy:       float
+    entry_option:   float
+    exit_option:    float
+    exit_reason:    str
+    pnl:            float
+    stop_width:     float
+    rr:             float
+    iv:             float
+    iv_source:      str
+
+def _simulate_sr_trade_real(sig: dict, stop_width: float, rr: float) -> Optional[SRRetestTradeReal]:
+    ds, direction, strike = sig['ds'], sig['direction'], sig['strike']
+    level, bars, entry_idx = sig['level_retested'], sig['bars'], sig['entry_idx']
+    entry_dt, entry_spy    = sig['entry_dt'], sig['entry_spy']
+    iv, iv_source          = sig['iv'], sig['iv_source']
+    chain = sig.get('chain')
+    if not chain:
+        return None
+
+    if direction == 'c':
+        stop_spy = level - stop_width
+        if stop_spy >= entry_spy:
+            return None
+        risk       = entry_spy - stop_spy
+        target_spy = entry_spy + rr * risk
+    else:
+        stop_spy = level + stop_width
+        if stop_spy <= entry_spy:
+            return None
+        risk       = stop_spy - entry_spy
+        target_spy = entry_spy - rr * risk
+    if risk < 0.02:
+        return None
+
+    entry_hm  = entry_dt.strftime('%H:%M')
+    entry_ask = _nearest_prior_quote(chain, entry_hm, 'ask')
+    if entry_ask is None or entry_ask <= 0:
+        return None
+
+    exit_bar, exit_reason, exit_spy = None, 'EOD', None
+    for b2 in bars[entry_idx + 1:]:
+        t2 = _et(b2)
+        if (t2.hour, t2.minute) >= SR_EXIT_CUTOFF:
+            exit_bar, exit_reason, exit_spy = b2, '3:45 cutoff', b2['c']
+            break
+        if direction == 'c':
+            if b2['l'] <= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (level-{stop_width:.2f})', stop_spy
+                break
+            if b2['h'] >= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'{rr:.1f}:1 target', target_spy
+                break
+        else:
+            if b2['h'] >= stop_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'stop (level+{stop_width:.2f})', stop_spy
+                break
+            if b2['l'] <= target_spy:
+                exit_bar, exit_reason, exit_spy = b2, f'{rr:.1f}:1 target', target_spy
+                break
+    if exit_bar is None:
+        exit_bar, exit_reason, exit_spy = bars[-1], 'EOD', bars[-1]['c']
+    exit_dt = _et(exit_bar)
+
+    exit_bid = _nearest_prior_quote(chain, exit_dt.strftime('%H:%M'), 'bid')
+    if exit_bid is None:
+        return None
+
+    pnl = round((exit_bid - entry_ask) * 100, 2)
+    return SRRetestTradeReal(
+        date=ds, entry_date=ds, entry_time=entry_hm, exit_time=exit_dt.strftime('%H:%M'),
+        direction=('CALL' if direction == 'c' else 'PUT'), strike=strike,
+        level_retested=level, entry_spy=round(entry_spy, 2), stop_spy=round(stop_spy, 2),
+        target_spy=round(target_spy, 2), exit_spy=round(exit_spy, 2),
+        entry_option=round(entry_ask, 4), exit_option=round(exit_bid, 4),
+        exit_reason=exit_reason, pnl=pnl, stop_width=stop_width, rr=rr,
+        iv=round(iv, 4), iv_source=iv_source)
+
+def run_sr_retest_real(spy_1min: dict, vix_daily: dict, dates: List[str],
+                        stop_widths: List[float], rr_targets: List[float],
+                        progress_every: int = 50
+                        ) -> Tuple[Dict[Tuple[float, float], List[SRRetestTradeReal]], dict, List[str]]:
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0, 'signal_days': 0,
+                'strike_unavailable': 0, 'intraday_fetch_ok': 0, 'intraday_fetch_failed': 0}
+    signals = []
+
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        if len(bars_1min) < 20:
+            continue
+        coverage['total_days'] += 1
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        sig = find_sr_retest_signal(ds, bars_1min)
+        if sig is None:
+            continue
+        coverage['signal_days'] += 1
+
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        real_strike = snap_to_real_strike(ds, sig['strike'], right)
+        if real_strike is None:
+            coverage['strike_unavailable'] += 1
+            continue
+        sig['strike'] = real_strike
+
+        r = rfr(date.fromisoformat(ds))
+        iv, iv_source = calibrate_iv_theta(ds, sig['entry_spy'], r)
+        if iv is None:
+            iv, iv_source = vix_daily.get(ds, 16.0) / 100.0, 'vix_fallback'
+        sig['iv'], sig['iv_source'] = iv, iv_source
+        signals.append(sig)
+
+    print(f'  {len(signals)} signal days -> fetching real intraday quotes '
+          f'(cache-first, one call/day covering entry->15:45)...')
+    for n, sig in enumerate(signals, 1):
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        chain_list = fetch_intraday_chain(
+            sig['ds'], sig['strike'], right,
+            sig['entry_dt'].strftime('%H:%M:%S'), '15:45:00')
+        sig['chain'] = {r['hm']: r for r in chain_list} if chain_list else None
+        if sig['chain']:
+            coverage['intraday_fetch_ok'] += 1
+        else:
+            coverage['intraday_fetch_failed'] += 1
+        if progress_every and n % progress_every == 0:
+            print(f'    {n}/{len(signals)} fetched  '
+                  f'(api_calls={THETA_API_CALLS}, api_time={THETA_API_SECONDS:.1f}s)')
+
+    results = {}
+    for sw in stop_widths:
+        for rr in rr_targets:
+            trades = []
+            for sig in signals:
+                t = _simulate_sr_trade_real(sig, sw, rr)
+                if t is not None:
+                    trades.append(t)
+            results[(sw, rr)] = trades
+
+    signal_dates = sorted(sig['ds'] for sig in signals)
+    return results, coverage, signal_dates
+
+def write_sr_retest_csv(results: Dict[Tuple[float, float], List[SRRetestTradeReal]], path: Path):
+    import csv as _csv
+    with path.open('w', newline='') as f:
+        w = _csv.writer(f)
+        w.writerow(['stop_width', 'rr', 'date', 'entry_time', 'entry_price', 'stop', 'target',
+                    'exit_price', 'exit_reason', 'pnl', 'direction', 'strike', 'level_retested',
+                    'exit_time', 'option_entry_price', 'option_exit_price', 'iv', 'iv_source'])
+        for (sw, rr), trades in results.items():
+            for t in trades:
+                w.writerow([sw, rr, t.date, t.entry_time, t.entry_spy, t.stop_spy, t.target_spy,
+                            t.exit_spy, t.exit_reason, t.pnl, t.direction, t.strike,
+                            t.level_retested, t.exit_time, t.entry_option, t.exit_option,
+                            t.iv, t.iv_source])
+
+def run_sr_retest_cli():
+    print(f"\n{'='*70}\n  S/R Retest (session high/low rejection) - REAL intraday ThetaData "
+          f"quotes, stop x R:R grid\n{'='*70}\n")
+    print("  Loading market data...")
+    spy_daily = load_spy_daily()
+    spy_1min  = load_spy_1min()
+    vix_daily = load_vix()
+    all_dates = sorted(spy_daily.keys())
+
+    t0 = time.time()
+    results, coverage, signal_dates = run_sr_retest_real(
+        spy_1min, vix_daily, all_dates, SR_STOP_WIDTHS, SR_RR_TARGETS)
+    elapsed = time.time() - t0
+
+    out_path = BASE / 'trades_sr_retest.csv'
+    write_sr_retest_csv(results, out_path)
+
+    print(f"\n  Elapsed: {elapsed:.1f}s\n")
+    print("  -- Coverage --")
+    print(f"  Total candidate days:     {coverage['total_days']}")
+    print(f"  Theta 0DTE usable:        {coverage['theta_usable']}")
+    print(f"  Theta 0DTE skipped:       {coverage['theta_skipped']}")
+    print(f"  Signal days:              {coverage['signal_days']}")
+    print(f"  Strike unavailable:       {coverage['strike_unavailable']}  (no real listed contract near that strike)")
+    print(f"  Intraday fetch OK:        {coverage['intraday_fetch_ok']}")
+    print(f"  Intraday fetch failed:    {coverage['intraday_fetch_failed']}")
+    print(f"  ThetaData API calls:      {THETA_API_CALLS}  (total {THETA_API_SECONDS:.1f}s, "
+          f"avg {THETA_API_SECONDS/max(THETA_API_CALLS,1)*1000:.0f}ms/call)")
+    print()
+    print("  -- Per-combo stats (real intraday fills) --")
+    grid_stats = {}
+    for sw in SR_STOP_WIDTHS:
+        for rr in SR_RR_TARGETS:
+            s = calc_stats(results[(sw, rr)])
+            grid_stats[(sw, rr)] = s
+            print(f"  stop=${sw:.2f}  rr={rr:.1f}  N={s['n']:>4}  WR={s['wr']:>5.1f}%  "
+                  f"Total P&L=${s['total_pnl']:>+10,.2f}  PF={fmt_pf(s):>5}  "
+                  f"AvgWin=${s['avg_win']:>7.2f}  AvgLoss=${s['avg_loss']:>8.2f}  MaxDD=${s['max_dd']:>9,.2f}")
+    print(f"\n  Wrote sweep results -> {out_path}")
+
+    finite = {k: v for k, v in grid_stats.items() if v['n'] > 0 and v['pf'] != float('inf')}
+    pool   = finite if finite else grid_stats
+    best_combo = max(pool, key=lambda k: (pool[k]['pf'], pool[k]['total_pnl']))
+    print(f"\n  Best combo by PF (tiebreak total P&L): stop=${best_combo[0]:.2f} rr={best_combo[1]:.1f}  "
+          f"{grid_stats[best_combo]}")
+
+    n = len(signal_dates)
+    split_idx = round(n * 0.70)
+    is_dates  = set(signal_dates[:split_idx])
+    oos_dates = set(signal_dates[split_idx:])
+    best_trades = results[best_combo]
+    is_trades   = [t for t in best_trades if t.date in is_dates]
+    oos_trades  = [t for t in best_trades if t.date in oos_dates]
+    s_is, s_oos = calc_stats(is_trades), calc_stats(oos_trades)
+    print(f"\n  -- IS/OOS split on best combo (stop=${best_combo[0]:.2f} rr={best_combo[1]:.1f}) --")
+    print(f"  {n} signal days total, 70% split = {split_idx}")
+    if signal_dates:
+        print(f"  IS:  {len(is_dates)} signal days ({signal_dates[0]} -> {signal_dates[max(split_idx-1,0)]})")
+        print(f"  OOS: {len(oos_dates)} signal days ({signal_dates[min(split_idx,n-1)]} -> {signal_dates[-1]})")
+    print(f"  IS  trades: N={s_is['n']:>4}  WR={s_is['wr']:>5.1f}%  Total P&L=${s_is['total_pnl']:>+10,.2f}  PF={fmt_pf(s_is):>5}")
+    print(f"  OOS trades: N={s_oos['n']:>4}  WR={s_oos['wr']:>5.1f}%  Total P&L=${s_oos['total_pnl']:>+10,.2f}  PF={fmt_pf(s_oos):>5}")
+
+    return results, coverage, grid_stats, best_combo, (s_is, s_oos)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# S/R Retest — FILTERED variant. Two extra conditions layered on top of
+# find_sr_retest_signal() above:
+#   1. Only the FIRST retest of a given level fires. "A given level" = the
+#      specific numeric session-high/session-low VALUE, not the category —
+#      once THIS high (or low) has produced a signal, no further signal on
+#      that same price for the rest of the session. If the running high/low
+#      later moves to a genuinely new extreme, that new value has never been
+#      retested, so it's independently eligible once it ages 30 min. This
+#      means a day can now produce more than one trade (e.g. the session low
+#      retests-and-holds early, then a later, deeper low does the same).
+#   2. No signal may trigger in the 11:30-13:30 ET lunch window, even if
+#      every other condition is met. Level tracking / aging is NOT paused
+#      during that window — only signal firing is suppressed.
+# Everything else (0.20 proximity, 30-min age, rejection-candle logic, real
+# ThetaData fills, stop/target/3:45 cutoff) is unchanged from the base
+# strategy and fully reused below.
+# ══════════════════════════════════════════════════════════════════════════════
+
+SR_LUNCH_START = (11, 30)
+SR_LUNCH_END   = (13, 30)
+
+def find_sr_retest_signals_filtered(ds: str, bars_1min: list) -> List[dict]:
+    """Like find_sr_retest_signal(), but scans the WHOLE session (doesn't stop
+    at the first hit) subject to the two filters described above. Returns a
+    list of 0+ signal dicts, one per (level, first-retest) event."""
+    bars = bars_1min
+    if len(bars) < 20:
+        return []
+
+    session_high = session_low = None
+    high_set_t = low_set_t = None
+    high_signaled_level = low_signaled_level = None
+    out = []
+
+    for i, b in enumerate(bars):
+        t = _et(b)
+        if session_high is None:
+            session_high, session_low = b['h'], b['l']
+            high_set_t = low_set_t = t
+            continue
+        if (t.hour, t.minute) > SR_ENTRY_END:
+            break
+
+        hm = (t.hour, t.minute)
+        in_window = SR_ENTRY_START <= hm <= SR_ENTRY_END
+        in_lunch  = SR_LUNCH_START <= hm < SR_LUNCH_END
+        if in_window and not in_lunch:
+            low_age  = (t - low_set_t).total_seconds() / 60.0
+            high_age = (t - high_set_t).total_seconds() / 60.0
+            if (low_age >= SR_LEVEL_MIN_AGE and session_low != low_signaled_level
+                    and b['l'] <= session_low + SR_PROXIMITY and b['c'] > session_low):
+                out.append({'ds': ds, 'bars': bars, 'direction': 'c', 'entry_idx': i,
+                            'entry_dt': t, 'entry_spy': b['c'],
+                            'strike': round(b['c'] / 0.5) * 0.5,
+                            'level_retested': round(session_low, 2)})
+                low_signaled_level = session_low
+            if (high_age >= SR_LEVEL_MIN_AGE and session_high != high_signaled_level
+                    and b['h'] >= session_high - SR_PROXIMITY and b['c'] < session_high):
+                out.append({'ds': ds, 'bars': bars, 'direction': 'p', 'entry_idx': i,
+                            'entry_dt': t, 'entry_spy': b['c'],
+                            'strike': round(b['c'] / 0.5) * 0.5,
+                            'level_retested': round(session_high, 2)})
+                high_signaled_level = session_high
+
+        if b['h'] > session_high:
+            session_high, high_set_t = b['h'], t
+        if b['l'] < session_low:
+            session_low, low_set_t = b['l'], t
+
+    return out
+
+def run_sr_retest_filtered_real(spy_1min: dict, vix_daily: dict, dates: List[str],
+                                 stop_widths: List[float], rr_targets: List[float],
+                                 progress_every: int = 50
+                                 ) -> Tuple[Dict[Tuple[float, float], List[SRRetestTradeReal]], dict, List[str]]:
+    coverage = {'total_days': 0, 'theta_usable': 0, 'theta_skipped': 0, 'signal_days': 0,
+                'signal_count': 0, 'strike_unavailable': 0, 'intraday_fetch_ok': 0,
+                'intraday_fetch_failed': 0}
+    signals = []
+
+    for ds in dates:
+        bars_1min = spy_1min.get(ds, [])
+        if len(bars_1min) < 20:
+            continue
+        coverage['total_days'] += 1
+        if not theta_0dte_usable(ds):
+            coverage['theta_skipped'] += 1
+            continue
+        coverage['theta_usable'] += 1
+
+        day_sigs = find_sr_retest_signals_filtered(ds, bars_1min)
+        if not day_sigs:
+            continue
+        coverage['signal_days']  += 1
+        coverage['signal_count'] += len(day_sigs)
+
+        for sig in day_sigs:
+            right = 'C' if sig['direction'] == 'c' else 'P'
+            real_strike = snap_to_real_strike(ds, sig['strike'], right)
+            if real_strike is None:
+                coverage['strike_unavailable'] += 1
+                continue
+            sig['strike'] = real_strike
+
+            r = rfr(date.fromisoformat(ds))
+            iv, iv_source = calibrate_iv_theta(ds, sig['entry_spy'], r)
+            if iv is None:
+                iv, iv_source = vix_daily.get(ds, 16.0) / 100.0, 'vix_fallback'
+            sig['iv'], sig['iv_source'] = iv, iv_source
+            signals.append(sig)
+
+    print(f'  {len(signals)} signals across {coverage["signal_days"]} signal days -> '
+          f'fetching real intraday quotes (cache-first, one call/signal covering entry->15:45)...')
+    for n, sig in enumerate(signals, 1):
+        right = 'C' if sig['direction'] == 'c' else 'P'
+        chain_list = fetch_intraday_chain(
+            sig['ds'], sig['strike'], right,
+            sig['entry_dt'].strftime('%H:%M:%S'), '15:45:00')
+        sig['chain'] = {r['hm']: r for r in chain_list} if chain_list else None
+        if sig['chain']:
+            coverage['intraday_fetch_ok'] += 1
+        else:
+            coverage['intraday_fetch_failed'] += 1
+        if progress_every and n % progress_every == 0:
+            print(f'    {n}/{len(signals)} fetched  '
+                  f'(api_calls={THETA_API_CALLS}, api_time={THETA_API_SECONDS:.1f}s)')
+
+    results = {}
+    for sw in stop_widths:
+        for rr in rr_targets:
+            trades = []
+            for sig in signals:
+                t = _simulate_sr_trade_real(sig, sw, rr)
+                if t is not None:
+                    trades.append(t)
+            results[(sw, rr)] = trades
+
+    signal_dates = sorted({sig['ds'] for sig in signals})
+    return results, coverage, signal_dates
+
+def run_sr_retest_filtered_cli():
+    print(f"\n{'='*70}\n  S/R Retest FILTERED (first-retest-per-level + no lunch signals) - "
+          f"REAL intraday ThetaData quotes, stop x R:R grid\n{'='*70}\n")
+    print("  Loading market data...")
+    spy_daily = load_spy_daily()
+    spy_1min  = load_spy_1min()
+    vix_daily = load_vix()
+    all_dates = sorted(spy_daily.keys())
+
+    t0 = time.time()
+    results, coverage, signal_dates = run_sr_retest_filtered_real(
+        spy_1min, vix_daily, all_dates, SR_STOP_WIDTHS, SR_RR_TARGETS)
+    elapsed = time.time() - t0
+
+    out_path = BASE / 'trades_sr_retest_filtered.csv'
+    write_sr_retest_csv(results, out_path)
+
+    print(f"\n  Elapsed: {elapsed:.1f}s\n")
+    print("  -- Coverage --")
+    print(f"  Total candidate days:     {coverage['total_days']}")
+    print(f"  Theta 0DTE usable:        {coverage['theta_usable']}")
+    print(f"  Theta 0DTE skipped:       {coverage['theta_skipped']}")
+    print(f"  Signal days:              {coverage['signal_days']}  (was 579 unfiltered)")
+    print(f"  Signal instances:         {coverage['signal_count']}  (can exceed signal days - multiple levels/day allowed)")
+    print(f"  Strike unavailable:       {coverage['strike_unavailable']}  (no real listed contract near that strike)")
+    print(f"  Intraday fetch OK:        {coverage['intraday_fetch_ok']}")
+    print(f"  Intraday fetch failed:    {coverage['intraday_fetch_failed']}")
+    print(f"  ThetaData API calls:      {THETA_API_CALLS}  (total {THETA_API_SECONDS:.1f}s, "
+          f"avg {THETA_API_SECONDS/max(THETA_API_CALLS,1)*1000:.0f}ms/call)")
+    print()
+    print("  -- Per-combo stats (real intraday fills) --")
+    grid_stats = {}
+    for sw in SR_STOP_WIDTHS:
+        for rr in SR_RR_TARGETS:
+            s = calc_stats(results[(sw, rr)])
+            grid_stats[(sw, rr)] = s
+            print(f"  stop=${sw:.2f}  rr={rr:.1f}  N={s['n']:>4}  WR={s['wr']:>5.1f}%  "
+                  f"Total P&L=${s['total_pnl']:>+10,.2f}  PF={fmt_pf(s):>5}  "
+                  f"AvgWin=${s['avg_win']:>7.2f}  AvgLoss=${s['avg_loss']:>8.2f}  MaxDD=${s['max_dd']:>9,.2f}")
+    print(f"\n  Wrote sweep results -> {out_path}")
+
+    finite = {k: v for k, v in grid_stats.items() if v['n'] > 0 and v['pf'] != float('inf')}
+    pool   = finite if finite else grid_stats
+    best_combo = max(pool, key=lambda k: (pool[k]['pf'], pool[k]['total_pnl']))
+    print(f"\n  Best combo by PF (tiebreak total P&L): stop=${best_combo[0]:.2f} rr={best_combo[1]:.1f}  "
+          f"{grid_stats[best_combo]}")
+
+    n = len(signal_dates)
+    split_idx = round(n * 0.70)
+    is_dates  = set(signal_dates[:split_idx])
+    oos_dates = set(signal_dates[split_idx:])
+    best_trades = results[best_combo]
+    is_trades   = [t for t in best_trades if t.date in is_dates]
+    oos_trades  = [t for t in best_trades if t.date in oos_dates]
+    s_is, s_oos = calc_stats(is_trades), calc_stats(oos_trades)
+    print(f"\n  -- IS/OOS split on best combo (stop=${best_combo[0]:.2f} rr={best_combo[1]:.1f}) --")
+    print(f"  {n} signal days total, 70% split = {split_idx}")
+    if signal_dates:
+        print(f"  IS:  {len(is_dates)} signal days ({signal_dates[0]} -> {signal_dates[max(split_idx-1,0)]})")
+        print(f"  OOS: {len(oos_dates)} signal days ({signal_dates[min(split_idx,n-1)]} -> {signal_dates[-1]})")
+    print(f"  IS  trades: N={s_is['n']:>4}  WR={s_is['wr']:>5.1f}%  Total P&L=${s_is['total_pnl']:>+10,.2f}  PF={fmt_pf(s_is):>5}")
+    print(f"  OOS trades: N={s_oos['n']:>4}  WR={s_oos['wr']:>5.1f}%  Total P&L=${s_oos['total_pnl']:>+10,.2f}  PF={fmt_pf(s_oos):>5}")
+
+    return results, coverage, grid_stats, best_combo, (s_is, s_oos)
+
+
+def write_orb_poc_csv(trades: List[ORPocTrade], path: Path):
+    """Columns date/entry_time/entry_price/stop/target/exit_price/exit_reason/pnl
+    hold SPY UNDERLYING price levels (for overlaying OR/POC/entry/stop/target
+    directly on a SPY candlestick chart), plus extra columns with the actual
+    traded option premiums and calibration metadata for full traceability."""
+    import csv as _csv
+    with path.open('w', newline='') as f:
+        w = _csv.writer(f)
+        w.writerow(['date', 'entry_time', 'entry_price', 'stop', 'target', 'exit_price',
+                    'exit_reason', 'pnl', 'direction', 'strike', 'poc', 'or_high', 'or_low',
+                    'exit_time', 'option_entry_price', 'option_exit_price', 'iv', 'iv_source'])
+        for t in trades:
+            w.writerow([t.date, t.entry_time, t.entry_spy, t.stop_spy, t.target_spy, t.exit_spy,
+                        t.exit_reason, t.pnl, t.direction, t.strike, t.poc, t.or_high, t.or_low,
+                        t.exit_time, t.entry_option, t.exit_option, t.iv, t.iv_source])
+
+def run_orb_poc_cli():
+    print(f"\n{'='*70}\n  R7-POC-RR3 - OR + Point of Control, fixed 3:1 R:R\n{'='*70}\n")
+    print("  Loading market data...")
+    vix_daily = load_vix()
+    spy_daily = load_spy_daily()
+    spy_1min  = load_spy_1min()
+    spy_5min  = load_spy_5min()
+    all_dates = sorted(spy_daily.keys())
+    print(f"  {len(all_dates)} candidate trading days, {len(spy_1min)} days with 1-min bars\n")
+
+    t0 = time.time()
+    trades, coverage = run_r7_or_poc_rr3(spy_1min, spy_5min, spy_daily, vix_daily, all_dates)
+    elapsed = time.time() - t0
+
+    out_path = BASE / 'trades_rr3.0.csv'
+    write_orb_poc_csv(trades, out_path)
+
+    s = calc_stats(trades)
+    print(f"  Elapsed: {elapsed:.1f}s\n")
+    print("  -- Theta cache coverage --")
+    print(f"  Total candidate days:     {coverage['total_days']}")
+    print(f"  Theta 0DTE usable:        {coverage['theta_usable']}")
+    print(f"  Theta 0DTE skipped:       {coverage['theta_skipped']}  (missing/empty/unreadable theta_SPY_{{date}}.pkl)")
+    print(f"  IV theta-calibrated:      {coverage['iv_theta_calibrated']}")
+    print(f"  IV vix/100 fallback:      {coverage['iv_vix_fallback']}  (no cached 3-15 DTE chain for that day)")
+    print(f"  Usable days with signal:  {coverage['signal_days']}")
+    print()
+    print("  -- Trade stats --")
+    print(f"  N={s['n']}  WR={s['wr']:.1f}%  Total P&L=${s['total_pnl']:+,.2f}  "
+          f"PF={fmt_pf(s)}  AvgWin=${s['avg_win']:.2f}  AvgLoss=${s['avg_loss']:.2f}  MaxDD=${s['max_dd']:.2f}")
+    print(f"\n  Wrote {len(trades)} trades -> {out_path}")
+    return trades, coverage, s
+
+
+# ══════════════════════════════════════════════════════════════════════════════
 # R8 — Friday Credit Spread with VWAP Confirmation
 # Previous Friday credit (H6) got 0 trades due to strike formula bug.
 # Fix: use proper delta-based strike selection + VWAP bullish bias filter.
@@ -1195,4 +3112,15 @@ def main():
     print(f"\n  Journal: {JOURNAL}\n")
 
 if __name__ == '__main__':
-    main()
+    if '--sr-retest-filtered' in sys.argv:
+        run_sr_retest_filtered_cli()
+    elif '--sr-retest' in sys.argv:
+        run_sr_retest_cli()
+    elif '--vwap-reversion' in sys.argv:
+        run_vwap_reversion_cli()
+    elif '--orb-poc-real' in sys.argv:
+        run_orb_poc_real_cli()
+    elif '--orb-poc' in sys.argv:
+        run_orb_poc_cli()
+    else:
+        main()

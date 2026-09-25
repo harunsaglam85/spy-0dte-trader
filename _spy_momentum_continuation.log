@@ -1,0 +1,33 @@
+Loading market data...
+
+730 candidate days -> 77 signal days triggered (652 no-signal [<0.3% by 10am], 1 missing-data)
+Wrote -> C:\Users\sagla\spy-0dte-trader\trades_spy_momentum_A_no_stop.csv
+Wrote -> C:\Users\sagla\spy-0dte-trader\trades_spy_momentum_B_stop1pct.csv
+
+===============================================================================================
+  SPY MOMENTUM CONTINUATION - VARIANT A (no stop) vs VARIANT B (-1% stop)
+===============================================================================================
+  A: no-stop   N=  77  WR=  57.1%  PF=  1.04  Total P&L=$   +291.00  AvgWin=$ 193.18  AvgLoss=$ -248.76  MaxDD=$ 2,374.50
+  B: -1% stop  N=  77  WR=  57.1%  PF=  1.18  Total P&L=$ +1,272.75  AvgWin=$ 193.18  AvgLoss=$ -219.01  MaxDD=$ 1,753.00
+
+  Better-performing variant: B  (N=77, PF=1.18, P&L=$+1,272.75)
+
+===============================================================================================
+  VALIDATION SPLITS on variant B
+===============================================================================================
+
+  -- Chronological 70/30 -- (77 signal days, split=54)
+  IS   (2023-07-05 -> 2025-11-14)  N=  54  WR=  64.8%  PF=  1.61  Total P&L=$ +2,464.33
+  OOS  (2025-11-17 -> 2026-05-01)  N=  23  WR=  39.1%  PF=  0.63  Total P&L=$ -1,191.58
+
+  -- Interleaved odd/even -- (77 trades)
+  EVEN N=  39  WR=  56.4%  PF=  1.00  Total P&L=$     +2.87
+  ODD  N=  38  WR=  57.9%  PF=  1.39  Total P&L=$ +1,269.88
+
+  -- Pass/fail (PF>=1.0 and positive P&L in every subset) --
+  IS    PF=  1.61  P&L=$+2,464.33  -> PASS
+  OOS   PF=  0.63  P&L=$-1,191.58  -> FAIL
+  EVEN  PF=  1.00  P&L=$    +2.87  -> PASS
+  ODD   PF=  1.39  P&L=$+1,269.88  -> PASS
+
+  Clears both validation splits: NO

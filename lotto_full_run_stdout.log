@@ -1,0 +1,64 @@
+[14:56:40] 731 trading days in [2023-07-01, 2026-05-31]
+[14:56:41] ThetaData client connected.
+[14:58:08]   ...25/731 days processed
+[14:59:37]   ...50/731 days processed
+[15:01:13]   ...75/731 days processed
+[15:02:55]   ...100/731 days processed
+[15:04:25]   ...125/731 days processed
+[15:05:30]   ...150/731 days processed
+[15:07:00]   ...175/731 days processed
+[15:08:25]   ...200/731 days processed
+[15:09:37]   ...225/731 days processed
+[15:13:28]   ...250/731 days processed
+[15:14:53]   ...275/731 days processed
+[15:17:08]   ...300/731 days processed
+[15:19:10]   ...325/731 days processed
+[15:21:12]   ...350/731 days processed
+[15:22:46]   ...375/731 days processed
+[15:23:13]   entry fetch FAILED 2025-01-09: No data found for: option_at_time_quote(SPY,2025-01-09,2025-01-09,09:35:00,2025-01-09,*,both,None,None)
+[15:23:56]   ...400/731 days processed
+[15:29:22]   ...425/731 days processed
+[15:32:36]   ...450/731 days processed
+[15:34:24]   ...475/731 days processed
+[15:35:35]   ...500/731 days processed
+[15:36:35]   ...525/731 days processed
+[15:37:39]   ...550/731 days processed
+[15:38:56]   ...575/731 days processed
+[15:40:05]   ...600/731 days processed
+[15:41:19]   ...625/731 days processed
+[15:42:31]   ...650/731 days processed
+[15:44:01]   ...675/731 days processed
+[15:45:27]   ...700/731 days processed
+[15:46:49]   ...725/731 days processed
+[15:47:12] Done fetching. skipped={'no_entry': 1, 'no_spot': 0, 'no_eod': 0}
+[15:47:12] Report written to C:\Users\sagla\backtest_lotto_basket_report.txt
+
+0DTE LOTTO BASKET BACKTEST
+Period: 2023-07-01 to 2026-05-31   Entry: 09:35:00 ET
+Price band: $0.05-$0.15 ask, per side, closest-to-ATM
+Skipped days: {'no_entry': 1, 'no_spot': 0, 'no_eod': 0}
+==============================================================================
+
+--- N=3 per side (5 contracts/day target) ---
+  Trading days:        730
+  Avg legs filled/day: 4.95
+  Total spent:         $34,840.00
+  Total returned:      $30,681.00
+  Net P&L:             $-4,159.00
+  Win rate (days):     7.8%  (57/730)
+  Avg day P&L:         $-5.70
+  Zero-payout days:    532 (72.9%)  -- all legs worthless
+  Some-payout days:    177 (24.2%)  -- partial recovery, not big
+  Big-payout days:     21 (2.9%)  -- payout > 5x day cost
+
+--- N=5 per side (6 contracts/day target) ---
+  Trading days:        730
+  Avg legs filled/day: 6.23
+  Total spent:         $40,961.00
+  Total returned:      $37,051.00
+  Net P&L:             $-3,910.00
+  Win rate (days):     7.4%  (54/730)
+  Avg day P&L:         $-5.36
+  Zero-payout days:    526 (72.1%)  -- all legs worthless
+  Some-payout days:    183 (25.1%)  -- partial recovery, not big
+  Big-payout days:     21 (2.9%)  -- payout > 5x day cost

@@ -1,0 +1,98 @@
+Loading market data...
+  730 candidate trading days in [2023-07-01, 2026-05-30]
+
+==========================================================================================
+  WEEKLY (3-5 DTE) R7-POC-RR3 — real intraday ThetaData quotes
+==========================================================================================
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=40, api_time=3.5s)
+    50/612 fetched  (api_calls=77, api_time=6.4s)
+    75/612 fetched  (api_calls=112, api_time=9.3s)
+    100/612 fetched  (api_calls=149, api_time=11.2s)
+    125/612 fetched  (api_calls=184, api_time=13.7s)
+    150/612 fetched  (api_calls=218, api_time=15.5s)
+    175/612 fetched  (api_calls=255, api_time=17.2s)
+    200/612 fetched  (api_calls=290, api_time=19.1s)
+    225/612 fetched  (api_calls=335, api_time=22.0s)
+    250/612 fetched  (api_calls=367, api_time=24.1s)
+    275/612 fetched  (api_calls=408, api_time=27.7s)
+    300/612 fetched  (api_calls=447, api_time=38.2s)
+    325/612 fetched  (api_calls=489, api_time=58.0s)
+    350/612 fetched  (api_calls=526, api_time=76.1s)
+    375/612 fetched  (api_calls=560, api_time=95.6s)
+    400/612 fetched  (api_calls=602, api_time=112.3s)
+    425/612 fetched  (api_calls=643, api_time=124.1s)
+    450/612 fetched  (api_calls=688, api_time=143.6s)
+    475/612 fetched  (api_calls=725, api_time=160.5s)
+    500/612 fetched  (api_calls=763, api_time=174.7s)
+    525/612 fetched  (api_calls=803, api_time=192.6s)
+    550/612 fetched  (api_calls=841, api_time=209.8s)
+    575/612 fetched  (api_calls=877, api_time=227.4s)
+    600/612 fetched  (api_calls=918, api_time=243.2s)
+  Elapsed: 268.4s
+  -- Coverage --
+  total_days                   729
+  theta_usable                 634
+  theta_skipped                95
+  signal_days                  628
+  strike_0dte_unavailable      0
+  no_weekly_exp                16
+  weekly_contract_unavailable  0
+  intraday_fetch_ok            612
+  intraday_fetch_failed        0
+
+==========================================================================================
+  0DTE reference — real intraday ThetaData quotes (cache-first)
+==========================================================================================
+  628 signal days -> fetching real intraday quotes (cache-first, one call/day covering entry->13:30)...
+    50/628 fetched  (api_calls=933, api_time=251.5s)
+    100/628 fetched  (api_calls=933, api_time=251.5s)
+    150/628 fetched  (api_calls=933, api_time=251.5s)
+    200/628 fetched  (api_calls=933, api_time=251.5s)
+    250/628 fetched  (api_calls=933, api_time=251.5s)
+    300/628 fetched  (api_calls=933, api_time=251.5s)
+    350/628 fetched  (api_calls=933, api_time=251.5s)
+    400/628 fetched  (api_calls=933, api_time=251.5s)
+    450/628 fetched  (api_calls=933, api_time=251.5s)
+    500/628 fetched  (api_calls=933, api_time=251.5s)
+    550/628 fetched  (api_calls=933, api_time=251.5s)
+    600/628 fetched  (api_calls=933, api_time=251.5s)
+  Elapsed: 2.8s
+  628 0DTE signals with a usable cached chain (for spread calc)
+
+==========================================================================================
+  STATS: 0DTE vs WEEKLY, by stop distance
+==========================================================================================
+
+-- stop=$0.05 --
+  0DTE       N= 588  WR=  33.5%  PF=  1.13  Total P&L=$  +2,703.00  AvgWin=$ 119.51  AvgLoss=$  -53.30
+  Weekly     N= 572  WR=  37.2%  PF=  1.17  Total P&L=$  +3,157.00  AvgWin=$ 102.94  AvgLoss=$  -52.28
+
+-- stop=$0.10 --
+  0DTE       N= 593  WR=  32.7%  PF=  1.06  Total P&L=$  +1,311.00  AvgWin=$ 119.69  AvgLoss=$  -54.91
+  Weekly     N= 577  WR=  36.4%  PF=  1.10  Total P&L=$  +2,000.00  AvgWin=$ 103.75  AvgLoss=$  -53.92
+
+==========================================================================================
+  SPREAD AS % OF OPTION PRICE
+==========================================================================================
+
+-- stop=$0.05 --
+  0DTE    entry spread:   1.05%  (n=588)   exit spread:   1.55%  (n=588)
+  Weekly  entry spread:   1.03%  (n=572)   exit spread:   0.82%  (n=572)
+
+-- stop=$0.10 --
+  0DTE    entry spread:   1.05%  (n=593)   exit spread:   1.59%  (n=593)
+  Weekly  entry spread:   1.03%  (n=577)   exit spread:   0.82%  (n=577)
+
+==========================================================================================
+  IS/OOS 70/30 split — best weekly combo: stop=$0.05
+==========================================================================================
+  612 weekly signal days total, 70% split = 428
+  IS:  428 days (2023-07-17 -> 2025-08-25)
+  OOS: 184 days (2025-08-26 -> 2026-05-29)
+
+  ALL  N= 572  WR=  37.2%  PF=  1.17  Total P&L=$   +3,157.00
+  IS   N= 400  WR=  37.8%  PF=  1.31  Total P&L=$   +3,641.00
+  OOS  N= 172  WR=  36.0%  PF=  0.93  Total P&L=$     -484.00
+
+  Wrote -> C:\Users\sagla\spy-0dte-trader\trades_weekly_rr3.0_sweep.csv

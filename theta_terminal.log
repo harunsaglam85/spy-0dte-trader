@@ -1,0 +1,10 @@
+[09-24-2026 18:58:05] INFO: Starting Theta Terminal v1.8.6 Revision A...
+[09-24-2026 18:58:05] INFO: Using C:\Users\sagla\ThetaData\ThetaTerminal\logs as the log directory
+[09-24-2026 18:58:05] INFO: Using C:\Users\sagla\ThetaData\ThetaTerminal\config_0.properties as the config file
+[09-24-2026 18:58:05] WARN: Configuration file not found: created a default config file.
+[09-24-2026 18:58:06] INFO: [FPSS] CONNECTED: [nj-a.thetadata.us:20000], Bundle: STOCK.FREE, OPTION.STANDARD, INDEX.FREE
+[09-24-2026 18:58:08] INFO: [MDDS] CONNECTED: [nj-a.thetadata.us:12000], Bundle: STOCK.FREE, OPTION.STANDARD, INDEX.FREE
+[09-24-2026 22:55:43] INFO: [MDDS] Connection lost... Attempting to reconnect every 1 seconds
+[09-24-2026 22:55:43] INFO: [FPSS] Connection lost... Attempting to reconnect every 1 seconds
+[09-25-2026 12:06:40] INFO: [FPSS] CONNECTED: [nj-a.thetadata.us:20000], Bundle: STOCK.FREE, OPTION.STANDARD, INDEX.FREE
+[09-25-2026 12:06:40] INFO: [MDDS] CONNECTED: [nj-a.thetadata.us:12000], Bundle: STOCK.FREE, OPTION.STANDARD, INDEX.FREE

@@ -1,0 +1,57 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+
+378 trades on low+medium-volume days (194 excluded, top-tercile-volume days)
+
+==========================================================================================
+  1. LOW+MEDIUM VOLUME COMBINED (top-tercile-volume days excluded)
+==========================================================================================
+  UNFILTERED   N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00
+  LOW+MEDIUM   N= 378  WR=  38.1%  PF=  1.36  Total P&L=$ +3,139.00  AvgWin=$  82.53  AvgLoss=$  -37.37
+
+==========================================================================================
+  2+3. VALIDATION SPLITS on LOW+MEDIUM-VOLUME filter
+==========================================================================================
+
+  -- Chronological 70/30 -- (378 signal days, split=265)
+  IS   (2023-07-17 -> 2025-02-04)  N= 265  WR=  37.7%  PF=  1.30  Total P&L=$ +1,755.00
+  OOS  (2025-02-05 -> 2026-04-29)  N= 113  WR=  38.9%  PF=  1.48  Total P&L=$ +1,384.00
+
+  -- Interleaved odd/even -- (378 trades)
+  EVEN N= 189  WR=  36.5%  PF=  1.21  Total P&L=$   +994.00
+  ODD  N= 189  WR=  39.7%  PF=  1.54  Total P&L=$ +2,145.00
+
+==========================================================================================
+  4. PASS/FAIL (PF>=1.0 and positive P&L in every subset)
+==========================================================================================
+  IS    PF=  1.30  P&L=$+1,755.00  -> PASS
+  OOS   PF=  1.48  P&L=$+1,384.00  -> PASS
+  EVEN  PF=  1.21  P&L=$  +994.00  -> PASS
+  ODD   PF=  1.54  P&L=$+2,145.00  -> PASS
+
+  Clears all four splits: YES

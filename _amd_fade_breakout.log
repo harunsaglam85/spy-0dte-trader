@@ -1,0 +1,250 @@
+Loading market data...
+  730 trading days in [2023-07-01, 2026-05-30]
+
+18 signal-detection configs x 2 stop-buffers x 3 target R:Rs = 108 total combos
+
+[1/18] variant=am15  buffer=$0.05  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 109, 'signal_days': 603, 'no_weekly_exp': 16}
+    50/603 fetched  (api_calls=71, api_time=4.3s)
+    100/603 fetched  (api_calls=137, api_time=7.7s)
+    150/603 fetched  (api_calls=213, api_time=12.2s)
+    200/603 fetched  (api_calls=289, api_time=15.9s)
+    250/603 fetched  (api_calls=365, api_time=19.3s)
+    300/603 fetched  (api_calls=434, api_time=24.0s)
+    350/603 fetched  (api_calls=509, api_time=49.0s)
+    400/603 fetched  (api_calls=581, api_time=81.2s)
+    450/603 fetched  (api_calls=667, api_time=112.0s)
+    500/603 fetched  (api_calls=747, api_time=144.9s)
+    550/603 fetched  (api_calls=822, api_time=175.1s)
+    600/603 fetched  (api_calls=875, api_time=196.2s)
+  running total: api_calls=875  api_time=196.2s  elapsed=3.4min
+
+[2/18] variant=am15  buffer=$0.05  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 352, 'signal_days': 364, 'no_weekly_exp': 12}
+    50/364 fetched  (api_calls=929, api_time=198.5s)
+    100/364 fetched  (api_calls=984, api_time=201.1s)
+    150/364 fetched  (api_calls=1033, api_time=204.8s)
+    200/364 fetched  (api_calls=1092, api_time=209.1s)
+    250/364 fetched  (api_calls=1148, api_time=230.5s)
+    300/364 fetched  (api_calls=1213, api_time=254.4s)
+    350/364 fetched  (api_calls=1272, api_time=281.1s)
+  running total: api_calls=1279  api_time=283.7s  elapsed=4.9min
+
+[3/18] variant=am15  buffer=$0.15  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 138, 'signal_days': 574, 'no_weekly_exp': 16}
+    50/574 fetched  (api_calls=1296, api_time=285.3s)
+    100/574 fetched  (api_calls=1312, api_time=286.5s)
+    150/574 fetched  (api_calls=1326, api_time=288.5s)
+    200/574 fetched  (api_calls=1338, api_time=289.0s)
+    250/574 fetched  (api_calls=1350, api_time=290.0s)
+    300/574 fetched  (api_calls=1357, api_time=291.0s)
+    350/574 fetched  (api_calls=1365, api_time=294.6s)
+    400/574 fetched  (api_calls=1373, api_time=299.2s)
+    450/574 fetched  (api_calls=1380, api_time=301.8s)
+    500/574 fetched  (api_calls=1383, api_time=303.2s)
+    550/574 fetched  (api_calls=1386, api_time=304.2s)
+  running total: api_calls=1391  api_time=306.2s  elapsed=5.4min
+
+[4/18] variant=am15  buffer=$0.15  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 382, 'signal_days': 335, 'no_weekly_exp': 11}
+    50/335 fetched  (api_calls=1393, api_time=306.3s)
+    100/335 fetched  (api_calls=1401, api_time=307.5s)
+    150/335 fetched  (api_calls=1402, api_time=307.6s)
+    200/335 fetched  (api_calls=1407, api_time=309.0s)
+    250/335 fetched  (api_calls=1409, api_time=309.6s)
+    300/335 fetched  (api_calls=1415, api_time=312.1s)
+  running total: api_calls=1416  api_time=312.6s  elapsed=5.5min
+
+[5/18] variant=am15  buffer=$0.30  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 201, 'signal_days': 514, 'no_weekly_exp': 13}
+    50/514 fetched  (api_calls=1444, api_time=313.8s)
+    100/514 fetched  (api_calls=1467, api_time=314.9s)
+    150/514 fetched  (api_calls=1481, api_time=315.6s)
+    200/514 fetched  (api_calls=1503, api_time=316.4s)
+    250/514 fetched  (api_calls=1529, api_time=318.6s)
+    300/514 fetched  (api_calls=1539, api_time=322.4s)
+    350/514 fetched  (api_calls=1546, api_time=325.5s)
+    400/514 fetched  (api_calls=1553, api_time=328.1s)
+    450/514 fetched  (api_calls=1568, api_time=334.4s)
+    500/514 fetched  (api_calls=1578, api_time=339.4s)
+  running total: api_calls=1578  api_time=339.4s  elapsed=6.0min
+
+[6/18] variant=am15  buffer=$0.30  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 446, 'signal_days': 273, 'no_weekly_exp': 9}
+    50/273 fetched  (api_calls=1588, api_time=340.1s)
+    100/273 fetched  (api_calls=1595, api_time=340.2s)
+    150/273 fetched  (api_calls=1598, api_time=340.5s)
+    200/273 fetched  (api_calls=1604, api_time=342.3s)
+    250/273 fetched  (api_calls=1608, api_time=344.3s)
+  running total: api_calls=1609  api_time=345.0s  elapsed=6.1min
+
+[7/18] variant=am30  buffer=$0.05  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 112, 'signal_days': 600, 'no_weekly_exp': 16}
+    50/600 fetched  (api_calls=1647, api_time=347.0s)
+    100/600 fetched  (api_calls=1690, api_time=349.0s)
+    150/600 fetched  (api_calls=1724, api_time=351.2s)
+    200/600 fetched  (api_calls=1767, api_time=353.7s)
+    250/600 fetched  (api_calls=1814, api_time=356.7s)
+    300/600 fetched  (api_calls=1859, api_time=358.9s)
+    350/600 fetched  (api_calls=1901, api_time=374.6s)
+    400/600 fetched  (api_calls=1948, api_time=396.8s)
+    450/600 fetched  (api_calls=2004, api_time=415.9s)
+    500/600 fetched  (api_calls=2053, api_time=436.9s)
+    550/600 fetched  (api_calls=2103, api_time=456.0s)
+    600/600 fetched  (api_calls=2138, api_time=471.1s)
+  running total: api_calls=2138  api_time=471.1s  elapsed=8.3min
+
+[8/18] variant=am30  buffer=$0.05  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 341, 'signal_days': 374, 'no_weekly_exp': 13}
+    50/374 fetched  (api_calls=2157, api_time=472.4s)
+    100/374 fetched  (api_calls=2171, api_time=473.6s)
+    150/374 fetched  (api_calls=2187, api_time=474.5s)
+    200/374 fetched  (api_calls=2208, api_time=476.1s)
+    250/374 fetched  (api_calls=2239, api_time=486.4s)
+    300/374 fetched  (api_calls=2262, api_time=495.7s)
+    350/374 fetched  (api_calls=2284, api_time=504.7s)
+  running total: api_calls=2288  api_time=506.9s  elapsed=8.9min
+
+[9/18] variant=am30  buffer=$0.15  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 141, 'signal_days': 572, 'no_weekly_exp': 15}
+    50/572 fetched  (api_calls=2293, api_time=507.1s)
+    100/572 fetched  (api_calls=2299, api_time=507.4s)
+    150/572 fetched  (api_calls=2308, api_time=507.9s)
+    200/572 fetched  (api_calls=2317, api_time=508.2s)
+    250/572 fetched  (api_calls=2327, api_time=508.9s)
+    300/572 fetched  (api_calls=2328, api_time=508.9s)
+    350/572 fetched  (api_calls=2332, api_time=510.1s)
+    400/572 fetched  (api_calls=2338, api_time=512.2s)
+    450/572 fetched  (api_calls=2359, api_time=519.7s)
+    500/572 fetched  (api_calls=2366, api_time=521.8s)
+    550/572 fetched  (api_calls=2368, api_time=522.7s)
+  running total: api_calls=2370  api_time=523.3s  elapsed=9.2min
+
+[10/18] variant=am30  buffer=$0.15  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 377, 'signal_days': 340, 'no_weekly_exp': 11}
+    50/340 fetched  (api_calls=2370, api_time=523.3s)
+    100/340 fetched  (api_calls=2374, api_time=523.7s)
+    150/340 fetched  (api_calls=2378, api_time=523.8s)
+    200/340 fetched  (api_calls=2380, api_time=523.9s)
+    250/340 fetched  (api_calls=2382, api_time=524.4s)
+    300/340 fetched  (api_calls=2384, api_time=525.1s)
+  running total: api_calls=2384  api_time=525.1s  elapsed=9.3min
+
+[11/18] variant=am30  buffer=$0.30  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 219, 'signal_days': 496, 'no_weekly_exp': 13}
+    50/496 fetched  (api_calls=2388, api_time=525.2s)
+    100/496 fetched  (api_calls=2400, api_time=525.6s)
+    150/496 fetched  (api_calls=2410, api_time=526.2s)
+    200/496 fetched  (api_calls=2414, api_time=526.8s)
+    250/496 fetched  (api_calls=2419, api_time=527.9s)
+    300/496 fetched  (api_calls=2426, api_time=530.0s)
+    350/496 fetched  (api_calls=2432, api_time=533.2s)
+    400/496 fetched  (api_calls=2443, api_time=536.4s)
+    450/496 fetched  (api_calls=2453, api_time=539.8s)
+  running total: api_calls=2459  api_time=542.0s  elapsed=9.6min
+
+[12/18] variant=am30  buffer=$0.30  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 449, 'signal_days': 269, 'no_weekly_exp': 10}
+    50/269 fetched  (api_calls=2461, api_time=542.1s)
+    100/269 fetched  (api_calls=2461, api_time=542.1s)
+    150/269 fetched  (api_calls=2463, api_time=542.1s)
+    200/269 fetched  (api_calls=2467, api_time=543.9s)
+    250/269 fetched  (api_calls=2469, api_time=544.7s)
+  running total: api_calls=2469  api_time=544.7s  elapsed=9.7min
+
+[13/18] variant=overnight  buffer=$0.05  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 391, 'signal_days': 332, 'no_weekly_exp': 5}
+    50/332 fetched  (api_calls=2539, api_time=548.0s)
+    100/332 fetched  (api_calls=2603, api_time=550.6s)
+    150/332 fetched  (api_calls=2680, api_time=554.6s)
+    200/332 fetched  (api_calls=2758, api_time=564.6s)
+    250/332 fetched  (api_calls=2826, api_time=592.2s)
+    300/332 fetched  (api_calls=2897, api_time=618.4s)
+  running total: api_calls=2934  api_time=631.8s  elapsed=11.2min
+
+[14/18] variant=overnight  buffer=$0.05  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 516, 'signal_days': 208, 'no_weekly_exp': 4}
+    50/208 fetched  (api_calls=2962, api_time=633.1s)
+    100/208 fetched  (api_calls=2985, api_time=634.1s)
+    150/208 fetched  (api_calls=3009, api_time=638.9s)
+    200/208 fetched  (api_calls=3039, api_time=650.0s)
+  running total: api_calls=3040  api_time=650.4s  elapsed=11.5min
+
+[15/18] variant=overnight  buffer=$0.15  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 370, 'signal_days': 352, 'no_weekly_exp': 6}
+    50/352 fetched  (api_calls=3052, api_time=651.0s)
+    100/352 fetched  (api_calls=3065, api_time=651.8s)
+    150/352 fetched  (api_calls=3070, api_time=652.2s)
+    200/352 fetched  (api_calls=3082, api_time=652.8s)
+    250/352 fetched  (api_calls=3094, api_time=662.7s)
+    300/352 fetched  (api_calls=3115, api_time=673.6s)
+    350/352 fetched  (api_calls=3128, api_time=678.1s)
+  running total: api_calls=3128  api_time=678.1s  elapsed=12.0min
+
+[16/18] variant=overnight  buffer=$0.15  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 497, 'signal_days': 227, 'no_weekly_exp': 4}
+    50/227 fetched  (api_calls=3133, api_time=678.5s)
+    100/227 fetched  (api_calls=3142, api_time=679.1s)
+    150/227 fetched  (api_calls=3149, api_time=680.1s)
+    200/227 fetched  (api_calls=3155, api_time=682.4s)
+  running total: api_calls=3158  api_time=683.9s  elapsed=12.2min
+
+[17/18] variant=overnight  buffer=$0.30  confirm=simple
+  coverage: {'total_days': 728, 'no_signal': 384, 'signal_days': 338, 'no_weekly_exp': 6}
+    50/338 fetched  (api_calls=3169, api_time=684.2s)
+    100/338 fetched  (api_calls=3177, api_time=685.0s)
+    150/338 fetched  (api_calls=3190, api_time=686.3s)
+    200/338 fetched  (api_calls=3198, api_time=687.0s)
+    250/338 fetched  (api_calls=3205, api_time=689.6s)
+    300/338 fetched  (api_calls=3214, api_time=692.9s)
+  running total: api_calls=3219  api_time=694.6s  elapsed=12.4min
+
+[18/18] variant=overnight  buffer=$0.30  confirm=strong
+  coverage: {'total_days': 728, 'no_signal': 514, 'signal_days': 210, 'no_weekly_exp': 4}
+    50/210 fetched  (api_calls=3225, api_time=695.2s)
+    100/210 fetched  (api_calls=3231, api_time=695.5s)
+    150/210 fetched  (api_calls=3236, api_time=696.1s)
+    200/210 fetched  (api_calls=3239, api_time=697.2s)
+  running total: api_calls=3241  api_time=697.6s  elapsed=12.4min
+
+Total elapsed: 12.4 min, 3241 ThetaData API calls (697.6s of API time)
+
+========================================================================================================
+  TOP 10 BY PROFIT FACTOR
+========================================================================================================
+Variant       Buf  Confirm StopBuf    RR     N      WR      PF     Total P&L
+am15         0.05  simple     0.15   3.5   602   28.1%    1.19     +3,838.00
+am15         0.05  simple     0.05   3.5   602   27.1%    1.17     +3,085.00
+overnight    0.30  simple     0.15   3.5   338   30.8%    1.16     +2,338.00
+overnight    0.15  simple     0.15   3.5   352   31.2%    1.16     +2,283.00
+am15         0.15  simple     0.15   3.5   573   28.3%    1.14     +2,875.00
+overnight    0.05  simple     0.15   3.5   332   30.1%    1.12     +1,661.00
+overnight    0.15  simple     0.05   3.5   352   30.4%    1.12     +1,628.00
+am15         0.05  strong     0.05   3.5   362   31.2%    1.11     +1,400.00
+am15         0.05  strong     0.15   3.5   362   33.1%    1.11     +1,458.00
+am15         0.15  strong     0.15   3.5   333   33.9%    1.10     +1,242.00
+
+Wrote full grid -> C:\Users\sagla\spy-0dte-trader\amd_grid_results.csv
+
+Best combo: variant=am15 buffer=$0.05 confirm=simple stop_buffer=$0.15 target_rr=3.5
+  N=602 WR=28.1% PF=1.19 Total P&L=$+3,838.00
+
+==========================================================================================
+  VALIDATION SPLITS on best combo
+==========================================================================================
+
+  -- Chronological 70/30 -- (602 signal days, split=421)
+  IS   (2023-07-03 -> 2025-07-22)  N= 421  WR=  28.7%  PF=  1.17  Total P&L=$ +2,208.00
+  OOS  (2025-07-23 -> 2026-05-29)  N= 181  WR=  26.5%  PF=  1.24  Total P&L=$ +1,630.00
+
+  -- Interleaved odd/even -- (602 trades)
+  EVEN N= 301  WR=  28.2%  PF=  1.31  Total P&L=$ +2,969.00
+  ODD  N= 301  WR=  27.9%  PF=  1.08  Total P&L=$   +869.00
+
+  -- Pass/fail (PF>=1.0 and positive P&L in every subset) --
+  IS    PF=  1.17  P&L=$+2,208.00  -> PASS
+  OOS   PF=  1.24  P&L=$+1,630.00  -> PASS
+  EVEN  PF=  1.31  P&L=$+2,969.00  -> PASS
+  ODD   PF=  1.08  P&L=$  +869.00  -> PASS
+
+  Clears all four splits: YES

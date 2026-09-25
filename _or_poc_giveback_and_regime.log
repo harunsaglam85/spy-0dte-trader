@@ -1,0 +1,85 @@
+Loading market data...
+Rebuilding weekly signals/trades (cache-hit, no new API calls)...
+  612 signal days -> probing/fetching real WEEKLY intraday quotes (cache-first, strike probe + one call/day covering entry->13:30)...
+    25/612 fetched  (api_calls=0, api_time=0.0s)
+    50/612 fetched  (api_calls=0, api_time=0.0s)
+    75/612 fetched  (api_calls=0, api_time=0.0s)
+    100/612 fetched  (api_calls=0, api_time=0.0s)
+    125/612 fetched  (api_calls=0, api_time=0.0s)
+    150/612 fetched  (api_calls=0, api_time=0.0s)
+    175/612 fetched  (api_calls=0, api_time=0.0s)
+    200/612 fetched  (api_calls=0, api_time=0.0s)
+    225/612 fetched  (api_calls=0, api_time=0.0s)
+    250/612 fetched  (api_calls=0, api_time=0.0s)
+    275/612 fetched  (api_calls=0, api_time=0.0s)
+    300/612 fetched  (api_calls=0, api_time=0.0s)
+    325/612 fetched  (api_calls=0, api_time=0.0s)
+    350/612 fetched  (api_calls=0, api_time=0.0s)
+    375/612 fetched  (api_calls=0, api_time=0.0s)
+    400/612 fetched  (api_calls=0, api_time=0.0s)
+    425/612 fetched  (api_calls=0, api_time=0.0s)
+    450/612 fetched  (api_calls=0, api_time=0.0s)
+    475/612 fetched  (api_calls=0, api_time=0.0s)
+    500/612 fetched  (api_calls=0, api_time=0.0s)
+    525/612 fetched  (api_calls=0, api_time=0.0s)
+    550/612 fetched  (api_calls=0, api_time=0.0s)
+    575/612 fetched  (api_calls=0, api_time=0.0s)
+    600/612 fetched  (api_calls=0, api_time=0.0s)
+
+==========================================================================================
+  A) GIVE-BACK ANALYSIS -- stop=$0.05
+==========================================================================================
+  572 total trades, 359 losers (62.8%)
+  359 losers with a valid signal/path (consistency mismatches: 0)
+
+  MFE-toward-target distribution among losers:
+    >=75%                        15  (  4.2%)
+    50-75%                       28  (  7.8%)
+    25-50%                       72  ( 20.1%)
+    5-25%                       142  ( 39.6%)
+    <5% (straight to stop)      102  ( 28.4%)
+
+  Give-back losses (reached >=50% of target distance): 43  (12.0% of losers)
+  Straight-to-stop losses (never reached 5% of target distance): 102  (28.4% of losers)
+
+==========================================================================================
+  A) GIVE-BACK ANALYSIS -- stop=$0.10
+==========================================================================================
+  577 total trades, 367 losers (63.6%)
+  367 losers with a valid signal/path (consistency mismatches: 0)
+
+  MFE-toward-target distribution among losers:
+    >=75%                        16  (  4.4%)
+    50-75%                       32  (  8.7%)
+    25-50%                       74  ( 20.2%)
+    5-25%                       146  ( 39.8%)
+    <5% (straight to stop)       99  ( 27.0%)
+
+  Give-back losses (reached >=50% of target distance): 48  (13.1% of losers)
+  Straight-to-stop losses (never reached 5% of target distance): 99  (27.0% of losers)
+
+==========================================================================================
+  A3) TRAILING-TO-BREAKEVEN VARIANT (trigger at 50% of target distance)
+==========================================================================================
+
+-- stop=$0.05 --
+  ORIGINAL  N= 572  WR=  37.2%  PF=  1.17  Total P&L=$ +3,157.00  AvgWin=$ 102.94  AvgLoss=$  -52.28
+  TRAILING  N= 572  WR=  38.5%  PF=  1.17  Total P&L=$ +3,101.00  AvgWin=$  95.28  AvgLoss=$  -50.74   (BE-stop exits: 65)
+
+-- stop=$0.10 --
+  ORIGINAL  N= 577  WR=  36.4%  PF=  1.10  Total P&L=$ +2,000.00  AvgWin=$ 103.75  AvgLoss=$  -53.92
+  TRAILING  N= 577  WR=  38.5%  PF=  1.13  Total P&L=$ +2,468.00  AvgWin=$  94.90  AvgLoss=$  -52.39   (BE-stop exits: 68)
+
+==========================================================================================
+  B) MARKET REGIME: IS window vs chronological OOS window
+==========================================================================================
+  IS  (2023-07-01 -> 2025-08-25):  {'n_days': 539, 'avg_vix': 16.809870141335455, 'realized_vol_ann': 16.040430898275808, 'pct_choppy': 38.775510204081634, 'pct_trending': 12.244897959183673, 'avg_oc_move_pct': 0.5380488866087547}
+  OOS (2025-08-26 -> 2026-05-29):  {'n_days': 191, 'avg_vix': 18.522356108221086, 'realized_vol_ann': 12.468255749415068, 'pct_choppy': 39.26701570680628, 'pct_trending': 9.424083769633508, 'avg_oc_move_pct': 0.48713206415452265}
+
+  Metric                                   IS            OOS
+  Trading days                            539            191
+  Avg VIX                               16.81          18.52
+  Realized vol (ann, %)                 16.04          12.47
+  Avg open->close move (%)               0.54           0.49
+  % days closing <=0.3% of open           38.8           39.3
+  % days with >1% move                   12.2            9.4
